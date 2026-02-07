@@ -12,8 +12,86 @@ const verEl = document.getElementById('ver');
 const msgEl = document.getElementById('msg');
 const statusEl = document.getElementById('status');
 const logEl = document.getElementById('log');
+const setupWinEl = document.getElementById('setup-win');
+const setupLinuxEl = document.getElementById('setup-linux');
+const setupMacEl = document.getElementById('setup-macos');
+const setupHintEl = document.getElementById('os-hint');
 
 verEl.textContent = `${window.appInfo.name} v${window.appInfo.version}`;
+
+const setupCommands = {
+  windows: [
+    '# Ollama (lokalnie)',
+    'winget install Ollama.Ollama',
+    'ollama pull llama3.1:8b',
+    '',
+    '# API key (provider online, np. Google Gemini)',
+    'setx GOOGLE_API_KEY "<TWOJ_KLUCZ>"',
+  ],
+  linux: [
+    '# Ollama (lokalnie)',
+    'curl -fsSL https://ollama.com/install.sh | sh',
+    'ollama pull llama3.1:8b',
+    '',
+    '# API key (provider online, np. Google Gemini)',
+    'export GOOGLE_API_KEY="<TWOJ_KLUCZ>"',
+  ],
+  macos: [
+    '# Ollama (lokalnie)',
+    'brew install ollama',
+    'ollama pull llama3.1:8b',
+    '',
+    '# API key (provider online, np. Google Gemini)',
+    'export GOOGLE_API_KEY="<TWOJ_KLUCZ>"',
+  ],
+};
+
+function normalizePlatform() {
+  const p = String(window.appInfo?.platform || '').toLowerCase();
+  if (p.startsWith('win')) return 'windows';
+  if (p === 'darwin') return 'macos';
+  return 'linux';
+}
+
+function setupGuideText() {
+  return [
+    'Windows (PowerShell):',
+    ...setupCommands.windows,
+    '',
+    'Linux:',
+    ...setupCommands.linux,
+    '',
+    'macOS:',
+    ...setupCommands.macos,
+  ].join('\n');
+}
+
+async function copySetupGuide() {
+  const text = setupGuideText();
+  try {
+    await navigator.clipboard.writeText(text);
+    message('Skopiowano instrukcje pierwszego uruchomienia.');
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    message('Skopiowano instrukcje pierwszego uruchomienia.');
+  }
+}
+
+function renderSetupGuide() {
+  setupWinEl.textContent = setupCommands.windows.join('\n');
+  setupLinuxEl.textContent = setupCommands.linux.join('\n');
+  setupMacEl.textContent = setupCommands.macos.join('\n');
+  const current = normalizePlatform();
+  const label = current === 'windows' ? 'Windows' : (current === 'macos' ? 'macOS' : 'Linux');
+  setupHintEl.textContent = `Wykryty system: ${label}`;
+}
 
 function val(id) {
   const el = document.getElementById(id);
@@ -159,7 +237,9 @@ document.getElementById('stop-btn').addEventListener('click', stopRun);
 document.getElementById('models-btn').addEventListener('click', fetchModels);
 document.getElementById('support-link').addEventListener('click', () => openExternal(SUPPORT_URL));
 document.getElementById('repo-link').addEventListener('click', () => openExternal(REPO_URL));
+document.getElementById('copy-setup-btn').addEventListener('click', copySetupGuide);
 
+renderSetupGuide();
 loadConfig();
 pollStatus();
 setInterval(pollStatus, 1200);

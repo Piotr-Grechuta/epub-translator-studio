@@ -40,6 +40,41 @@ cd project-web-desktop
 .\run-desktop.ps1
 ```
 
+## First Run
+- You need one of these paths:
+  - local AI: Ollama installed + at least one model,
+  - online AI: valid API key (`GOOGLE_API_KEY`) + internet access.
+
+### Ollama install commands
+Windows (PowerShell):
+```powershell
+winget install Ollama.Ollama
+ollama pull llama3.1:8b
+```
+
+Linux:
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3.1:8b
+```
+
+macOS:
+```bash
+brew install ollama
+ollama pull llama3.1:8b
+```
+
+### Online provider API key
+Windows (PowerShell):
+```powershell
+setx GOOGLE_API_KEY "<YOUR_KEY>"
+```
+
+Linux/macOS:
+```bash
+export GOOGLE_API_KEY="<YOUR_KEY>"
+```
+
 ## Requirements
 - Local AI with Ollama: install Ollama and pull at least one model (example: `ollama pull llama3.1:8b`).
 - Online AI (for example Google Gemini): set a valid API key (`GOOGLE_API_KEY` or GUI field).

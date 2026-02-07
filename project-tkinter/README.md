@@ -27,6 +27,24 @@ Wariant motywu:
 python start_horizon.py
 ```
 
+## Pierwsze uruchomienie (wymagane)
+- Lokalnie (Ollama): zainstalowana Ollama + co najmniej jeden model.
+- Online (np. Google Gemini): poprawny klucz API (`GOOGLE_API_KEY`) + internet.
+
+Windows (PowerShell):
+```powershell
+winget install Ollama.Ollama
+ollama pull llama3.1:8b
+setx GOOGLE_API_KEY "<TWOJ_KLUCZ>"
+```
+
+Linux/macOS:
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3.1:8b
+export GOOGLE_API_KEY="<TWOJ_KLUCZ>"
+```
+
 ## Najważniejsze pliki
 - `start.py` - główne GUI,
 - `studio_suite.py` - Studio Tools,

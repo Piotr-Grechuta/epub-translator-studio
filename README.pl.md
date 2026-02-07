@@ -41,6 +41,41 @@ cd project-web-desktop
 .\run-desktop.ps1
 ```
 
+## Pierwsze uruchomienie
+- Potrzebujesz jednej z drog:
+  - AI lokalnie: zainstalowana Ollama + co najmniej jeden model,
+  - AI online: poprawny klucz API (`GOOGLE_API_KEY`) + internet.
+
+### Komendy instalacji Ollama
+Windows (PowerShell):
+```powershell
+winget install Ollama.Ollama
+ollama pull llama3.1:8b
+```
+
+Linux:
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3.1:8b
+```
+
+macOS:
+```bash
+brew install ollama
+ollama pull llama3.1:8b
+```
+
+### Klucz API dla providera online
+Windows (PowerShell):
+```powershell
+setx GOOGLE_API_KEY "<TWOJ_KLUCZ>"
+```
+
+Linux/macOS:
+```bash
+export GOOGLE_API_KEY="<TWOJ_KLUCZ>"
+```
+
 ## Wymagania
 - Lokalny AI (Ollama): zainstalowana Ollama oraz pobrany co najmniej jeden model (np. `ollama pull llama3.1:8b`).
 - AI online (np. Google Gemini): ustawiony poprawny klucz API (`GOOGLE_API_KEY` lub pole w GUI).
@@ -55,7 +90,7 @@ cd project-web-desktop
 Dzieki temu zachowanie logiki runtime jest synchronizowane miedzy wariantami.
 
 ## Dokumentacja
-- manual u¿ytkownika Tkinter (PL): `project-tkinter/MANUAL_PL.md`
+- manual uzytkownika Tkinter (PL): `project-tkinter/MANUAL_PL.md`
 - workflow Git na wielu komputerach: `project-tkinter/GIT_WORKFLOW_PL.md`
 - informacje o wsparciu: `SUPPORT_PL.md`
 

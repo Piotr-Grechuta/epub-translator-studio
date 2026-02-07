@@ -290,6 +290,7 @@ class TranslatorGUI:
             text=self.tr("button.repo_online", "Repo online"),
             command=lambda: self._open_url(REPO_URL),
         ).pack(side="left", padx=(8, 0))
+        self._build_first_start_card(outer)
 
         top = ttk.Frame(outer)
         top.pack(fill="both", expand=True)
@@ -320,6 +321,99 @@ class TranslatorGUI:
 
         self.status_label = ttk.Label(outer, textvariable=self.status_var, style="StatusReady.TLabel")
         self.status_label.pack(anchor="w", pady=(10, 0))
+
+    def _build_first_start_card(self, parent: ttk.Frame) -> None:
+        card = ttk.LabelFrame(parent, text=self.tr("section.first_start", "Pierwsze uruchomienie (wymagane)"), padding=12)
+        card.pack(fill="x", pady=(0, 12))
+
+        ttk.Label(
+            card,
+            text=self.tr(
+                "first_start.summary",
+                "Aby uruchomic translacje: dla Ollama potrzebna jest instalacja + model, "
+                "a dla providerow online poprawny API key i internet.",
+            ),
+            style="Sub.TLabel",
+            justify="left",
+            wraplength=1120,
+        ).pack(anchor="w")
+
+        self.first_start_box = tk.Text(
+            card,
+            height=12,
+            wrap="word",
+            font=("Consolas", 10),
+            bg="#f8fafc",
+            fg="#1f2937",
+            relief="solid",
+            bd=1,
+        )
+        self.first_start_box.pack(fill="x", pady=(8, 0))
+        self.first_start_box.insert("1.0", self._first_start_setup_text())
+        self.first_start_box.configure(state="disabled")
+
+        btns = ttk.Frame(card)
+        btns.pack(anchor="w", pady=(8, 0))
+        self.copy_setup_btn = ttk.Button(
+            btns,
+            text=self.tr("button.copy_first_start", "Kopiuj instrukcje pierwszego uruchomienia"),
+            command=self._copy_first_start_setup,
+        )
+        self.copy_setup_btn.pack(side="left")
+        self.open_manual_btn = ttk.Button(
+            btns,
+            text=self.tr("button.open_manual", "Otworz manual"),
+            command=lambda: self._open_path(self.workdir / "MANUAL_PL.md"),
+        )
+        self.open_manual_btn.pack(side="left", padx=(8, 0))
+
+    def _current_platform_label(self) -> str:
+        name = platform.system().lower()
+        if name.startswith("win"):
+            return "Windows"
+        if name == "darwin":
+            return "macOS"
+        return "Linux"
+
+    def _first_start_setup_text(self) -> str:
+        lines: List[str] = [
+            self.tr("first_start.current_os", "Wykryty system: {name}", name=self._current_platform_label()),
+            "",
+            self.tr("first_start.need_local", "Lokalny provider (Ollama) wymaga instalacji i modelu:"),
+            "",
+            "Windows (PowerShell):",
+            "  winget install Ollama.Ollama",
+            "  ollama pull llama3.1:8b",
+            "",
+            "Linux:",
+            "  curl -fsSL https://ollama.com/install.sh | sh",
+            "  ollama pull llama3.1:8b",
+            "",
+            "macOS:",
+            "  brew install ollama",
+            "  ollama pull llama3.1:8b",
+            "",
+            self.tr("first_start.need_online", "Provider online (np. Google Gemini) wymaga API key i internetu:"),
+            "",
+            "Windows (PowerShell):",
+            '  setx GOOGLE_API_KEY "<TWOJ_KLUCZ>"',
+            "",
+            "Linux / macOS:",
+            '  export GOOGLE_API_KEY="<TWOJ_KLUCZ>"',
+        ]
+        return "\n".join(lines)
+
+    def _copy_first_start_setup(self) -> None:
+        try:
+            txt = self._first_start_setup_text()
+            self.root.clipboard_clear()
+            self.root.clipboard_append(txt)
+            self._set_status(
+                self.tr("status.first_start_copied", "Skopiowano instrukcje pierwszego uruchomienia"),
+                "ready",
+            )
+        except Exception as e:
+            self._msg_error(f"{self.tr('err.copy_failed', 'Nie udalo sie skopiowac instrukcji:')}\n{e}")
 
     def _widget_opt(self, widget: tk.Misc, key: str) -> str:
         try:
@@ -382,6 +476,8 @@ class TranslatorGUI:
         text_tip = {
             self.tr("button.support_project", "Wesprzyj projekt"): tt("tip.button.support_project", "Opens voluntary donation page (GitHub Sponsors)."),
             self.tr("button.repo_online", "Repo online"): tt("tip.button.repo_online", "Opens project repository in browser."),
+            self.tr("button.copy_first_start", "Kopiuj instrukcje pierwszego uruchomienia"): tt("tip.button.copy_first_start", "Copies first-run setup commands."),
+            self.tr("button.open_manual", "Otworz manual"): tt("tip.button.open_manual", "Opens user manual."),
             self.tr("button.new", "Nowy"): tt("tip.button.new", "Creates a new project in SQLite."),
             self.tr("button.save", "Zapisz"): tt("tip.button.save", "Saves project changes and current paths/settings."),
             self.tr("button.delete", "Usuń"): tt("tip.button.delete", "Soft-delete project: hidden from active list, history remains."),

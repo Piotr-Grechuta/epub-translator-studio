@@ -22,6 +22,32 @@
     </header>
 
     <main class="layout">
+      <section class="card setup-card">
+        <h2>Pierwsze uruchomienie (wymagane)</h2>
+        <p class="setup-note">
+          Aby aplikacja dzialala poprawnie, potrzebujesz: (1) Ollama + model dla pracy lokalnej, albo
+          (2) poprawny API key i internet dla providerow online (np. Google Gemini).
+        </p>
+        <p id="os-hint" class="setup-note"></p>
+        <div class="setup-grid">
+          <div>
+            <h3>Windows (PowerShell)</h3>
+            <pre id="setup-win"></pre>
+          </div>
+          <div>
+            <h3>Linux</h3>
+            <pre id="setup-linux"></pre>
+          </div>
+          <div>
+            <h3>macOS</h3>
+            <pre id="setup-macos"></pre>
+          </div>
+        </div>
+        <div class="row actions">
+          <button id="copy-setup-btn">Kopiuj instrukcje pierwszego uruchomienia</button>
+        </div>
+      </section>
+
       <section class="card">
         <h2>Konfiguracja runu</h2>
         <div class="grid">

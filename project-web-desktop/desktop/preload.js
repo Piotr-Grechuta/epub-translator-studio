@@ -3,6 +3,7 @@
 contextBridge.exposeInMainWorld('appInfo', {
   name: 'Translator Studio Desktop',
   version: '0.1.0',
+  platform: process.platform,
 });
 
 contextBridge.exposeInMainWorld('desktopApi', {
