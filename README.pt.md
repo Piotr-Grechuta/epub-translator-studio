@@ -43,5 +43,5 @@ cd project-web-desktop
 - Licenca: `PolyForm Noncommercial 1.0.0` (`LICENSE`)
 - Voce pode copiar e modificar apenas para fins nao comerciais.
 - Mantenha atribuicao do autor e Required Notice (`NOTICE`, `AUTHORS`).
-- Exemplos praticos (PT): `LICENSE_EXAMPLES_PT.md`
+- Exemplos praticos (PT): `LICENSE_GUIDE_PT.md`
 

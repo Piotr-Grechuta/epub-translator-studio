@@ -1,4 +1,4 @@
-﻿# EPUB Translator Studio
+# EPUB Translator Studio
 
 Jezyk: [English](README.md) | **Polski** | [Deutsch](README.de.md) | [Espanol](README.es.md) | [Francais](README.fr.md) | [Portugues](README.pt.md)
 
@@ -50,7 +50,7 @@ cd project-web-desktop
 Dzieki temu zachowanie logiki runtime jest synchronizowane miedzy wariantami.
 
 ## Dokumentacja
-- manual użytkownika Tkinter (PL): `project-tkinter/MANUAL_PL.md`
+- manual u�ytkownika Tkinter (PL): `project-tkinter/MANUAL_PL.md`
 - workflow Git na wielu komputerach: `project-tkinter/GIT_WORKFLOW_PL.md`
 - informacje o wsparciu: `SUPPORT_PL.md`
 
@@ -63,9 +63,9 @@ Dzieki temu zachowanie logiki runtime jest synchronizowane miedzy wariantami.
 - Mozna kopiowac i modyfikowac kod do celow niekomercyjnych.
 - Przy kopiowaniu/forku trzeba zachowac informacje o autorze i Required Notice (`NOTICE`, `AUTHORS`).
 - Proste przyklady:
-  - EN: `LICENSE_EXAMPLES_EN.md`
-  - PL: `LICENSE_EXAMPLES_PL.md`
-  - DE: `LICENSE_EXAMPLES_DE.md`
-  - ES: `LICENSE_EXAMPLES_ES.md`
-  - FR: `LICENSE_EXAMPLES_FR.md`
-  - PT: `LICENSE_EXAMPLES_PT.md`
+  - EN: `LICENSE_GUIDE_EN.md`
+  - PL: `LICENSE_GUIDE_PL.md`
+  - DE: `LICENSE_GUIDE_DE.md`
+  - ES: `LICENSE_GUIDE_ES.md`
+  - FR: `LICENSE_GUIDE_FR.md`
+  - PT: `LICENSE_GUIDE_PT.md`
