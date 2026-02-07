@@ -1,4 +1,4 @@
-﻿const { app, BrowserWindow } = require('electron');
+﻿const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 
 function createWindow() {
@@ -18,6 +18,14 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  ipcMain.handle('open-external', async (_event, url) => {
+    if (typeof url !== 'string') return false;
+    const u = url.trim();
+    if (!u) return false;
+    await shell.openExternal(u);
+    return true;
+  });
+
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

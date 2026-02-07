@@ -25,6 +25,19 @@ body {
   border-bottom: 1px solid var(--border);
   background: #ffffffd9;
 }
+.topbar-right {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+.support-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.support-links button {
+  background: #116149;
+}
 
 .topbar h1 { margin: 0; font-size: 40px; letter-spacing: 0.2px; }
 .sub { margin: 4px 0 0; color: var(--muted); }

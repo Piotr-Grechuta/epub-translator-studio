@@ -41,3 +41,7 @@ Priorytet translacji:
 2. fallback: `project-web-desktop/backend/engine/tlumacz_ollama.py`.
 
 To oznacza, ze poprawki w logice uruchomienia/translacji z wariantu Tkinter są automatycznie widoczne w wariancie web-desktop.
+
+## Wsparcie projektu
+- Sponsor: https://github.com/sponsors/piotrgrechuta-web
+- Link jest tez dostepny w topbar aplikacji desktop (`Wesprzyj projekt`).

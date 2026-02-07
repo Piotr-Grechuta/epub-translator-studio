@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 import zipfile
 import datetime
 from pathlib import Path
@@ -53,6 +54,8 @@ SQLITE_FILE = Path(__file__).resolve().with_name(DB_FILE)
 LOCALES_DIR = Path(__file__).resolve().with_name("locales")
 OLLAMA_HOST_DEFAULT = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 GOOGLE_API_KEY_ENV = "GOOGLE_API_KEY"
+SUPPORT_URL = "https://github.com/sponsors/piotrgrechuta-web"
+REPO_URL = "https://github.com/piotrgrechuta-web/epu2pl"
 GOOGLE_KEYRING_SERVICE = "epub-translator-studio"
 GOOGLE_KEYRING_USER = "google_api_key"
 GLOBAL_PROGRESS_RE = re.compile(r"GLOBAL\s+(\d+)\s*/\s*(\d+)\s*\(([^)]*)\)\s*\|\s*(.*)")
@@ -275,6 +278,18 @@ class TranslatorGUI:
             text=self.tr("app.subtitle", "Nowoczesny panel do translacji EPUB (Ollama / Google) z zapisem ustawien i logiem na zywo."),
             style="Sub.TLabel",
         ).pack(anchor="w", pady=(0, 12))
+        links = ttk.Frame(outer)
+        links.pack(anchor="w", pady=(0, 12))
+        ttk.Button(
+            links,
+            text=self.tr("button.support_project", "Wesprzyj projekt"),
+            command=lambda: self._open_url(SUPPORT_URL),
+        ).pack(side="left")
+        ttk.Button(
+            links,
+            text=self.tr("button.repo_online", "Repo online"),
+            command=lambda: self._open_url(REPO_URL),
+        ).pack(side="left", padx=(8, 0))
 
         top = ttk.Frame(outer)
         top.pack(fill="both", expand=True)
@@ -365,6 +380,8 @@ class TranslatorGUI:
             str(self.status_var._name): tip(tt("tip.status.short", "Current app status.")),
         }
         text_tip = {
+            self.tr("button.support_project", "Wesprzyj projekt"): tt("tip.button.support_project", "Opens voluntary donation page (GitHub Sponsors)."),
+            self.tr("button.repo_online", "Repo online"): tt("tip.button.repo_online", "Opens project repository in browser."),
             self.tr("button.new", "Nowy"): tt("tip.button.new", "Creates a new project in SQLite."),
             self.tr("button.save", "Zapisz"): tt("tip.button.save", "Saves project changes and current paths/settings."),
             self.tr("button.delete", "Usuń"): tt("tip.button.delete", "Soft-delete project: hidden from active list, history remains."),
@@ -1211,6 +1228,15 @@ class TranslatorGUI:
                 subprocess.Popen(["open", str(p)])
             else:
                 subprocess.Popen(["xdg-open", str(p)])
+        except Exception as e:
+            self._msg_error(f"{self.tr('err.open_failed', 'Nie udało się otworzyć:')}\n{e}")
+
+    def _open_url(self, url: str) -> None:
+        u = (url or "").strip()
+        if not u:
+            return
+        try:
+            webbrowser.open(u, new=2)
         except Exception as e:
             self._msg_error(f"{self.tr('err.open_failed', 'Nie udało się otworzyć:')}\n{e}")
 

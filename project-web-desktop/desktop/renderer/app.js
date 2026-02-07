@@ -1,4 +1,6 @@
 ﻿const API = 'http://127.0.0.1:8765';
+const SUPPORT_URL = 'https://github.com/sponsors/piotrgrechuta-web';
+const REPO_URL = 'https://github.com/piotrgrechuta-web/epu2pl';
 
 const ids = [
   'provider','model','input_epub','output_epub','prompt','glossary','cache','ollama_host','google_api_key',
@@ -54,13 +56,25 @@ function message(text, isErr = false) {
   msgEl.className = isErr ? 'msg err' : 'msg ok';
 }
 
+async function openExternal(url) {
+  const u = (url || '').trim();
+  if (!u) return;
+  try {
+    if (window.desktopApi && typeof window.desktopApi.openExternal === 'function') {
+      await window.desktopApi.openExternal(u);
+      return;
+    }
+  } catch {}
+  window.open(u, '_blank', 'noopener,noreferrer');
+}
+
 async function loadConfig() {
   try {
     const cfg = await api('/config');
     for (const id of ids) setVal(id, cfg[id]);
-    message('Config załadowany.');
+    message('Config zaladowany.');
   } catch (e) {
-    message(`Błąd load config: ${e.message}`, true);
+    message(`Blad load config: ${e.message}`, true);
   }
 }
 
@@ -69,7 +83,7 @@ async function saveConfig() {
     await api('/config', { method: 'POST', body: JSON.stringify(collectState()) });
     message('Config zapisany.');
   } catch (e) {
-    message(`Błąd save config: ${e.message}`, true);
+    message(`Blad save config: ${e.message}`, true);
   }
 }
 
@@ -78,7 +92,7 @@ async function startRun() {
     await api('/run/start', { method: 'POST', body: JSON.stringify({ state: collectState() }) });
     message('Start run OK.');
   } catch (e) {
-    message(`Błąd start: ${e.message}`, true);
+    message(`Blad start: ${e.message}`, true);
   }
 }
 
@@ -92,16 +106,16 @@ async function validateRun() {
     await api('/run/validate', { method: 'POST', body: JSON.stringify({ epub_path: epub, tags: val('tags') }) });
     message('Start walidacji OK.');
   } catch (e) {
-    message(`Błąd walidacji: ${e.message}`, true);
+    message(`Blad walidacji: ${e.message}`, true);
   }
 }
 
 async function stopRun() {
   try {
     await api('/run/stop', { method: 'POST', body: '{}' });
-    message('Stop wysłany.');
+    message('Stop wyslany.');
   } catch (e) {
-    message(`Błąd stop: ${e.message}`, true);
+    message(`Blad stop: ${e.message}`, true);
   }
 }
 
@@ -123,7 +137,7 @@ async function fetchModels() {
     }
     message(`Modele google: ${data.models.length}`);
   } catch (e) {
-    message(`Błąd modeli: ${e.message}`, true);
+    message(`Blad modeli: ${e.message}`, true);
   }
 }
 
@@ -143,6 +157,8 @@ document.getElementById('start-btn').addEventListener('click', startRun);
 document.getElementById('validate-btn').addEventListener('click', validateRun);
 document.getElementById('stop-btn').addEventListener('click', stopRun);
 document.getElementById('models-btn').addEventListener('click', fetchModels);
+document.getElementById('support-link').addEventListener('click', () => openExternal(SUPPORT_URL));
+document.getElementById('repo-link').addEventListener('click', () => openExternal(REPO_URL));
 
 loadConfig();
 pollStatus();

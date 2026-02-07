@@ -13,3 +13,4 @@ Kazdy projekt jest odseparowany i ma wlasne pliki potrzebne do dzialania.
 ## Wsparcie projektu
 - Wesprzyj dobrowolnie: https://github.com/sponsors/piotrgrechuta-web
 - Szczegoly: `SUPPORT_PL.md`
+- Link jest tez widoczny w aplikacji (`Wesprzyj projekt`).
