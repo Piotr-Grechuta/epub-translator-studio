@@ -1791,7 +1791,8 @@ class TranslatorGUI:
 
                 self.root.after(0, lambda: self._set_models(models))
             except Exception as e:
-                self.root.after(0, lambda: self.model_status.configure(text=f"Błąd: {e}"))
+                err_text = str(e)
+                self.root.after(0, lambda msg=err_text: self.model_status.configure(text=f"Błąd: {msg}"))
 
         threading.Thread(target=worker, daemon=True).start()
 
