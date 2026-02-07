@@ -1,10 +1,11 @@
 ﻿# EPUB Translator Studio
 
-Language: **English** | [Polski](README.pl.md)
+Language: **English** | [Polski](README.pl.md) | [Deutsch](README.de.md) | [Espanol](README.es.md) | [Francais](README.fr.md) | [Portugues](README.pt.md)
 
 Desktop toolkit for translating and editing EPUB files with AI.
 
 Keywords: `EPUB translator`, `AI translation`, `Ollama`, `Google Gemini`, `Translation Memory`, `QA`, `Tkinter`, `Electron`, `FastAPI`, `Python`.
+Localized keyword sets: `KEYWORDS.en.txt`, `KEYWORDS.pl.txt`, `KEYWORDS.de.txt`, `KEYWORDS.es.txt`, `KEYWORDS.fr.txt`, `KEYWORDS.pt.txt`.
 
 ## What it does
 - EPUB translation (`translate`) and post-editing (`edit`)
@@ -61,4 +62,10 @@ This keeps core runtime behavior synchronized across both variants.
 - License: `PolyForm Noncommercial 1.0.0` (`LICENSE`)
 - You can copy and modify the code for noncommercial purposes.
 - Keep creator attribution and required notices in redistributions (`NOTICE`, `AUTHORS`).
-- Practical examples (PL): `LICENSE_EXAMPLES_PL.md`
+- Practical examples:
+  - EN: `LICENSE_EXAMPLES_EN.md`
+  - PL: `LICENSE_EXAMPLES_PL.md`
+  - DE: `LICENSE_EXAMPLES_DE.md`
+  - ES: `LICENSE_EXAMPLES_ES.md`
+  - FR: `LICENSE_EXAMPLES_FR.md`
+  - PT: `LICENSE_EXAMPLES_PT.md`
