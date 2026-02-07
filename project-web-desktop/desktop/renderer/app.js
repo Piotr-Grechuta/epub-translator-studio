@@ -1,23 +1,48 @@
-﻿const API = 'http://127.0.0.1:8765';
+const API = 'http://127.0.0.1:8765';
 const SUPPORT_URL = 'https://github.com/sponsors/piotrgrechuta-web';
 const REPO_URL = 'https://github.com/piotrgrechuta-web/epu2pl';
 
-const ids = [
-  'provider','model','input_epub','output_epub','prompt','glossary','cache','ollama_host','google_api_key',
-  'source_lang','target_lang','timeout','attempts','backoff','batch_max_segs','batch_max_chars','sleep',
-  'temperature','num_ctx','num_predict','tags','use_cache','use_glossary'
+const FORM_IDS = [
+  'mode', 'provider', 'model', 'input_epub', 'output_epub', 'prompt', 'glossary', 'cache', 'ollama_host',
+  'google_api_key', 'source_lang', 'target_lang', 'timeout', 'attempts', 'backoff', 'batch_max_segs',
+  'batch_max_chars', 'sleep', 'temperature', 'num_ctx', 'num_predict', 'tags', 'use_cache', 'use_glossary',
+];
+const PROFILE_IDS = [
+  'provider', 'model', 'debug_dir', 'ollama_host', 'batch_max_segs', 'batch_max_chars', 'sleep', 'timeout',
+  'attempts', 'backoff', 'temperature', 'num_ctx', 'num_predict', 'tags', 'use_cache', 'use_glossary',
+  'checkpoint', 'source_lang', 'target_lang',
 ];
 
 const verEl = document.getElementById('ver');
 const msgEl = document.getElementById('msg');
 const statusEl = document.getElementById('status');
+const countsEl = document.getElementById('counts');
 const logEl = document.getElementById('log');
+const historyEl = document.getElementById('history');
 const setupWinEl = document.getElementById('setup-win');
 const setupLinuxEl = document.getElementById('setup-linux');
 const setupMacEl = document.getElementById('setup-macos');
 const setupHintEl = document.getElementById('os-hint');
 
+const projectSelectEl = document.getElementById('project_select');
+const modeEl = document.getElementById('mode');
+const profileSelectEl = document.getElementById('profile_select');
+const runAllBtn = document.getElementById('run-all-btn');
+const stopRunAllBtn = document.getElementById('stop-run-all-btn');
+
 verEl.textContent = `${window.appInfo.name} v${window.appInfo.version}`;
+
+let currentProjectId = null;
+let tmDbPath = 'translator_studio.db';
+let profiles = [];
+let stepValues = {
+  translate: { output: '', prompt: '', cache: '', profile_id: null },
+  edit: { output: '', prompt: '', cache: '', profile_id: null },
+};
+let runAllActive = false;
+let runAllBusy = false;
+let prevRunning = false;
+let suppressModeEvent = false;
 
 const setupCommands = {
   windows: [
@@ -66,6 +91,15 @@ function setupGuideText() {
   ].join('\n');
 }
 
+function renderSetupGuide() {
+  setupWinEl.textContent = setupCommands.windows.join('\n');
+  setupLinuxEl.textContent = setupCommands.linux.join('\n');
+  setupMacEl.textContent = setupCommands.macos.join('\n');
+  const current = normalizePlatform();
+  const label = current === 'windows' ? 'Windows' : (current === 'macos' ? 'macOS' : 'Linux');
+  setupHintEl.textContent = `Wykryty system: ${label}`;
+}
+
 async function copySetupGuide() {
   const text = setupGuideText();
   try {
@@ -84,35 +118,76 @@ async function copySetupGuide() {
   }
 }
 
-function renderSetupGuide() {
-  setupWinEl.textContent = setupCommands.windows.join('\n');
-  setupLinuxEl.textContent = setupCommands.linux.join('\n');
-  setupMacEl.textContent = setupCommands.macos.join('\n');
-  const current = normalizePlatform();
-  const label = current === 'windows' ? 'Windows' : (current === 'macos' ? 'macOS' : 'Linux');
-  setupHintEl.textContent = `Wykryty system: ${label}`;
+function modeNorm(v) {
+  return v === 'edit' ? 'edit' : 'translate';
 }
 
 function val(id) {
   const el = document.getElementById(id);
+  if (!el) return '';
   if (el.type === 'checkbox') return !!el.checked;
   return el.value;
 }
 
-function setVal(id, v) {
+function setVal(id, value) {
   const el = document.getElementById(id);
-  if (el.type === 'checkbox') el.checked = !!v;
-  else el.value = v ?? '';
+  if (!el) return;
+  if (el.type === 'checkbox') {
+    el.checked = !!value;
+  } else {
+    el.value = value ?? '';
+  }
+}
+
+function currentMode() {
+  return modeNorm(String(val('mode') || 'translate'));
+}
+
+function selectedProfileId() {
+  const raw = String(profileSelectEl.value || '').trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function captureCurrentStep() {
+  const m = currentMode();
+  stepValues[m] = {
+    output: String(val('output_epub') || ''),
+    prompt: String(val('prompt') || ''),
+    cache: String(val('cache') || ''),
+    profile_id: selectedProfileId(),
+  };
+}
+
+function applyStepToForm(mode) {
+  const m = modeNorm(mode);
+  const step = stepValues[m] || { output: '', prompt: '', cache: '', profile_id: null };
+  setVal('output_epub', step.output || '');
+  setVal('prompt', step.prompt || '');
+  setVal('cache', step.cache || '');
+  profileSelectEl.value = step.profile_id == null ? '' : String(step.profile_id);
 }
 
 function collectState() {
   const out = {};
-  for (const id of ids) out[id] = val(id);
+  for (const id of FORM_IDS) out[id] = val(id);
+  out.mode = currentMode();
   out.debug_dir = 'debug';
   out.checkpoint = '0';
-  out.tm_db = 'translator_studio.db';
-  out.tm_project_id = null;
+  out.tm_db = tmDbPath || 'translator_studio.db';
+  out.tm_project_id = currentProjectId;
   return out;
+}
+
+function applyState(state) {
+  for (const id of FORM_IDS) {
+    if (Object.prototype.hasOwnProperty.call(state, id)) setVal(id, state[id]);
+  }
+  if (state.tm_db) tmDbPath = String(state.tm_db);
+  suppressModeEvent = true;
+  setVal('mode', modeNorm(String(state.mode || 'translate')));
+  suppressModeEvent = false;
 }
 
 async function api(path, opts = {}) {
@@ -123,9 +198,7 @@ async function api(path, opts = {}) {
   const body = await r.text();
   let data = {};
   try { data = JSON.parse(body); } catch {}
-  if (!r.ok) {
-    throw new Error(data.detail || body || `HTTP ${r.status}`);
-  }
+  if (!r.ok) throw new Error(data.detail || body || `HTTP ${r.status}`);
   return data;
 }
 
@@ -134,8 +207,42 @@ function message(text, isErr = false) {
   msgEl.className = isErr ? 'msg err' : 'msg ok';
 }
 
+function formatTs(ts) {
+  const n = Number(ts || 0);
+  if (!n) return '-';
+  const d = new Date(n * 1000);
+  return d.toLocaleString();
+}
+
+function updateCounts(counts) {
+  const c = counts || {};
+  countsEl.textContent = `idle=${c.idle || 0} | pending=${c.pending || 0} | running=${c.running || 0} | error=${c.error || 0}`;
+}
+
+function setRunAllButtons() {
+  runAllBtn.disabled = runAllActive;
+  stopRunAllBtn.disabled = !runAllActive;
+}
+
+function renderHistory(runs) {
+  const list = Array.isArray(runs) ? runs : [];
+  if (!list.length) {
+    historyEl.textContent = 'Brak historii runow dla aktywnego projektu.';
+    return;
+  }
+  historyEl.textContent = list.map((r) => {
+    const started = formatTs(r.started_at);
+    const step = r.step || '-';
+    const status = r.status || '-';
+    const done = Number(r.global_done || 0);
+    const total = Number(r.global_total || 0);
+    const msg = r.message || '';
+    return `[${started}] ${step} | ${status} | ${done}/${total} | ${msg}`;
+  }).join('\n');
+}
+
 async function openExternal(url) {
-  const u = (url || '').trim();
+  const u = String(url || '').trim();
   if (!u) return;
   try {
     if (window.desktopApi && typeof window.desktopApi.openExternal === 'function') {
@@ -146,42 +253,336 @@ async function openExternal(url) {
   window.open(u, '_blank', 'noopener,noreferrer');
 }
 
+function refillProfileSelect() {
+  const current = selectedProfileId();
+  profileSelectEl.innerHTML = '';
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = '-- brak --';
+  profileSelectEl.appendChild(empty);
+  for (const p of profiles) {
+    const o = document.createElement('option');
+    o.value = String(p.id);
+    o.textContent = p.name;
+    profileSelectEl.appendChild(o);
+  }
+  if (current != null) profileSelectEl.value = String(current);
+}
+
 async function loadConfig() {
   try {
     const cfg = await api('/config');
-    for (const id of ids) setVal(id, cfg[id]);
-    message('Config zaladowany.');
+    applyState(cfg);
+    captureCurrentStep();
   } catch (e) {
     message(`Blad load config: ${e.message}`, true);
   }
 }
 
-async function saveConfig() {
+async function saveConfig(notify = true) {
   try {
     await api('/config', { method: 'POST', body: JSON.stringify(collectState()) });
-    message('Config zapisany.');
+    if (notify) message('Config zapisany.');
+    return true;
   } catch (e) {
     message(`Blad save config: ${e.message}`, true);
+    return false;
   }
 }
 
+async function loadProfiles() {
+  try {
+    const data = await api('/profiles');
+    profiles = Array.isArray(data.profiles) ? data.profiles : [];
+    refillProfileSelect();
+    applyStepToForm(currentMode());
+  } catch (e) {
+    message(`Blad profili: ${e.message}`, true);
+  }
+}
+
+async function loadProjects(keepSelection = true) {
+  try {
+    const data = await api('/projects');
+    const list = Array.isArray(data.projects) ? data.projects : [];
+    const old = keepSelection ? currentProjectId : null;
+    projectSelectEl.innerHTML = '';
+    for (const p of list) {
+      const o = document.createElement('option');
+      o.value = String(p.id);
+      o.textContent = `${p.name} | ${p.status} | step=${p.active_step}`;
+      projectSelectEl.appendChild(o);
+    }
+    updateCounts(data.counts || {});
+    if (!list.length) {
+      currentProjectId = null;
+      renderHistory([]);
+      return;
+    }
+    let next = null;
+    if (old != null && list.some((p) => Number(p.id) === Number(old))) next = Number(old);
+    if (next == null && data.active_project_id != null && list.some((p) => Number(p.id) === Number(data.active_project_id))) {
+      next = Number(data.active_project_id);
+    }
+    if (next == null) next = Number(list[0].id);
+    await selectProject(next, null, false);
+  } catch (e) {
+    message(`Blad projektow: ${e.message}`, true);
+  }
+}
+
+function consumeProjectStepValues(project) {
+  const sv = project?.step_values || {};
+  stepValues = {
+    translate: {
+      output: String(sv.translate?.output || ''),
+      prompt: String(sv.translate?.prompt || ''),
+      cache: String(sv.translate?.cache || ''),
+      profile_id: sv.translate?.profile_id == null ? null : Number(sv.translate.profile_id),
+    },
+    edit: {
+      output: String(sv.edit?.output || ''),
+      prompt: String(sv.edit?.prompt || ''),
+      cache: String(sv.edit?.cache || ''),
+      profile_id: sv.edit?.profile_id == null ? null : Number(sv.edit.profile_id),
+    },
+  };
+}
+
+async function selectProject(projectId, modeOverride = null, announce = true) {
+  if (projectId == null) return;
+  try {
+    const body = { project_id: Number(projectId) };
+    if (modeOverride) body.mode = modeNorm(modeOverride);
+    const data = await api('/projects/select', { method: 'POST', body: JSON.stringify(body) });
+    const project = data.project;
+    currentProjectId = Number(project.id);
+    projectSelectEl.value = String(currentProjectId);
+    consumeProjectStepValues(project);
+    applyState(data.state || {});
+    applyStepToForm(currentMode());
+    renderHistory(data.runs || []);
+    updateCounts(data.counts || {});
+    if (announce) message(`Aktywny projekt: ${project.name}`);
+  } catch (e) {
+    message(`Blad wyboru projektu: ${e.message}`, true);
+  }
+}
+
+async function saveProject(notify = true) {
+  if (currentProjectId == null) {
+    if (notify) message('Najpierw utworz lub wybierz projekt.', true);
+    return false;
+  }
+  try {
+    captureCurrentStep();
+    const vals = {
+      input_epub: String(val('input_epub') || ''),
+      glossary_path: String(val('glossary') || ''),
+      source_lang: String(val('source_lang') || '').toLowerCase(),
+      target_lang: String(val('target_lang') || '').toLowerCase(),
+      output_translate_epub: stepValues.translate.output || '',
+      output_edit_epub: stepValues.edit.output || '',
+      prompt_translate: stepValues.translate.prompt || '',
+      prompt_edit: stepValues.edit.prompt || '',
+      cache_translate_path: stepValues.translate.cache || '',
+      cache_edit_path: stepValues.edit.cache || '',
+      profile_translate_id: stepValues.translate.profile_id,
+      profile_edit_id: stepValues.edit.profile_id,
+      active_step: currentMode(),
+    };
+    const data = await api(`/projects/${currentProjectId}/save`, {
+      method: 'POST',
+      body: JSON.stringify({ values: vals }),
+    });
+    if (data.project) consumeProjectStepValues(data.project);
+    if (notify) message('Projekt zapisany.');
+    return true;
+  } catch (e) {
+    message(`Blad zapisu projektu: ${e.message}`, true);
+    return false;
+  }
+}
+
+async function createProject() {
+  const name = String(val('new_project_name') || '').trim();
+  const src = String(val('new_project_source') || '').trim();
+  if (!name) {
+    message('Podaj nazwe projektu.', true);
+    return;
+  }
+  try {
+    const data = await api('/projects/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        source_epub: src,
+        source_lang: val('source_lang'),
+        target_lang: val('target_lang'),
+      }),
+    });
+    setVal('new_project_name', '');
+    await loadProfiles();
+    await loadProjects(false);
+    if (data.project?.id != null) await selectProject(Number(data.project.id), null, false);
+    message(`Utworzono projekt: ${name}`);
+  } catch (e) {
+    message(`Blad tworzenia projektu: ${e.message}`, true);
+  }
+}
+
+async function deleteProject() {
+  if (currentProjectId == null) {
+    message('Brak aktywnego projektu.', true);
+    return;
+  }
+  if (!window.confirm('Usunac aktywny projekt z listy?')) return;
+  try {
+    await api(`/projects/${currentProjectId}/delete`, { method: 'POST', body: JSON.stringify({ hard: false }) });
+    currentProjectId = null;
+    await loadProjects(false);
+    message('Projekt usuniety z listy.');
+  } catch (e) {
+    message(`Blad usuwania projektu: ${e.message}`, true);
+  }
+}
+
+async function saveProfile() {
+  const name = String(val('new_profile_name') || '').trim();
+  if (!name) {
+    message('Podaj nazwe profilu.', true);
+    return;
+  }
+  try {
+    const data = await api('/profiles/create', {
+      method: 'POST',
+      body: JSON.stringify({ name, state: collectState() }),
+    });
+    setVal('new_profile_name', '');
+    await loadProfiles();
+    const pid = Number(data.profile?.id);
+    if (Number.isFinite(pid)) {
+      stepValues[currentMode()].profile_id = pid;
+      profileSelectEl.value = String(pid);
+    }
+    message(`Profil zapisany: ${name}`);
+  } catch (e) {
+    message(`Blad zapisu profilu: ${e.message}`, true);
+  }
+}
+
+async function applyProfile() {
+  const pid = selectedProfileId();
+  if (pid == null) {
+    message('Wybierz profil.', true);
+    return;
+  }
+  try {
+    const data = await api(`/profiles/${pid}`);
+    const settings = data.profile?.settings || {};
+    for (const k of PROFILE_IDS) {
+      if (Object.prototype.hasOwnProperty.call(settings, k)) setVal(k, settings[k]);
+    }
+    stepValues[currentMode()].profile_id = pid;
+    message(`Wczytano profil: ${data.profile?.name || pid}`);
+  } catch (e) {
+    message(`Blad wczytywania profilu: ${e.message}`, true);
+  }
+}
+
+async function refreshHistory() {
+  if (currentProjectId == null) {
+    renderHistory([]);
+    return;
+  }
+  try {
+    const data = await api(`/runs/recent?project_id=${encodeURIComponent(String(currentProjectId))}&limit=20`);
+    renderHistory(data.runs || []);
+  } catch (e) {
+    historyEl.textContent = `Blad historii: ${e.message}`;
+  }
+}
+
+async function queueCurrent() {
+  if (!(await saveProject(false))) return;
+  try {
+    const data = await api('/queue/mark', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: currentProjectId, step: currentMode() }),
+    });
+    updateCounts(data.counts || {});
+    message(`Projekt zakolejkowany (${currentMode()}).`);
+  } catch (e) {
+    message(`Blad kolejki: ${e.message}`, true);
+  }
+}
+
+async function runNextPending() {
+  try {
+    const data = await api('/queue/run-next', {
+      method: 'POST',
+      body: JSON.stringify({ state: collectState() }),
+    });
+    if (!data.ok) {
+      message('Kolejka jest pusta.');
+      return false;
+    }
+    if (data.project?.id != null) {
+      await selectProject(Number(data.project.id), data.mode || data.project.active_step, false);
+    } else {
+      await refreshHistory();
+    }
+    message('Uruchomiono kolejny projekt z kolejki.');
+    return true;
+  } catch (e) {
+    message(`Blad uruchamiania kolejki: ${e.message}`, true);
+    return false;
+  }
+}
+
+async function startRunAll() {
+  runAllActive = true;
+  setRunAllButtons();
+  const started = await runNextPending();
+  if (!started) {
+    runAllActive = false;
+    setRunAllButtons();
+  }
+}
+
+function stopRunAll() {
+  runAllActive = false;
+  setRunAllButtons();
+  message('Run-all zatrzymany po biezacym zadaniu.');
+}
+
 async function startRun() {
+  if (!(await saveProject(false))) return;
+  await saveConfig(false);
   try {
     await api('/run/start', { method: 'POST', body: JSON.stringify({ state: collectState() }) });
-    message('Start run OK.');
+    message(`Start kroku: ${currentMode()}`);
   } catch (e) {
     message(`Blad start: ${e.message}`, true);
   }
 }
 
 async function validateRun() {
-  const epub = val('output_epub') || val('input_epub');
+  const epub = String(val('output_epub') || val('input_epub') || '').trim();
   if (!epub) {
     message('Podaj output_epub lub input_epub.', true);
     return;
   }
   try {
-    await api('/run/validate', { method: 'POST', body: JSON.stringify({ epub_path: epub, tags: val('tags') }) });
+    await api('/run/validate', {
+      method: 'POST',
+      body: JSON.stringify({
+        epub_path: epub,
+        tags: val('tags'),
+        project_id: currentProjectId,
+        tm_db: tmDbPath,
+      }),
+    });
     message('Start walidacji OK.');
   } catch (e) {
     message(`Blad walidacji: ${e.message}`, true);
@@ -199,21 +600,17 @@ async function stopRun() {
 
 async function fetchModels() {
   try {
-    const provider = val('provider');
+    const provider = String(val('provider') || 'ollama');
     if (provider === 'ollama') {
-      const data = await api(`/models/ollama?host=${encodeURIComponent(val('ollama_host'))}`);
-      if (data.models && data.models.length) {
-        setVal('model', data.models[0]);
-      }
-      message(`Modele ollama: ${data.models.length}`);
+      const data = await api(`/models/ollama?host=${encodeURIComponent(String(val('ollama_host') || ''))}`);
+      if (data.models?.length && !String(val('model') || '').trim()) setVal('model', data.models[0]);
+      message(`Modele ollama: ${data.models?.length || 0}`);
       return;
     }
-    const key = val('google_api_key');
+    const key = String(val('google_api_key') || '');
     const data = await api(`/models/google?api_key=${encodeURIComponent(key)}`);
-    if (data.models && data.models.length) {
-      setVal('model', data.models[0]);
-    }
-    message(`Modele google: ${data.models.length}`);
+    if (data.models?.length && !String(val('model') || '').trim()) setVal('model', data.models[0]);
+    message(`Modele google: ${data.models?.length || 0}`);
   } catch (e) {
     message(`Blad modeli: ${e.message}`, true);
   }
@@ -225,21 +622,120 @@ async function pollStatus() {
     statusEl.textContent = `Status: ${s.running ? 'RUNNING' : 'IDLE'} | mode=${s.mode} | exit=${s.exit_code ?? '--'}`;
     logEl.textContent = s.log || '';
     logEl.scrollTop = logEl.scrollHeight;
+    if (runAllActive && prevRunning && !s.running && !runAllBusy) {
+      runAllBusy = true;
+      const started = await runNextPending();
+      if (!started) {
+        runAllActive = false;
+        setRunAllButtons();
+      }
+      runAllBusy = false;
+    }
+    prevRunning = !!s.running;
   } catch (e) {
     statusEl.textContent = `Status: backend offline (${e.message})`;
   }
 }
 
-document.getElementById('save-btn').addEventListener('click', saveConfig);
-document.getElementById('start-btn').addEventListener('click', startRun);
-document.getElementById('validate-btn').addEventListener('click', validateRun);
-document.getElementById('stop-btn').addEventListener('click', stopRun);
-document.getElementById('models-btn').addEventListener('click', fetchModels);
-document.getElementById('support-link').addEventListener('click', () => openExternal(SUPPORT_URL));
-document.getElementById('repo-link').addEventListener('click', () => openExternal(REPO_URL));
-document.getElementById('copy-setup-btn').addEventListener('click', copySetupGuide);
+async function pickOpenFile(filters = []) {
+  try {
+    if (window.desktopApi && typeof window.desktopApi.pickFile === 'function') {
+      return await window.desktopApi.pickFile({ filters });
+    }
+  } catch {}
+  return '';
+}
 
-renderSetupGuide();
-loadConfig();
-pollStatus();
-setInterval(pollStatus, 1200);
+async function pickSaveFile(defaultPath = '', filters = []) {
+  try {
+    if (window.desktopApi && typeof window.desktopApi.pickSaveFile === 'function') {
+      return await window.desktopApi.pickSaveFile({ defaultPath, filters });
+    }
+  } catch {}
+  return '';
+}
+
+async function pickIntoField(fieldId, save = false, filters = []) {
+  const current = String(val(fieldId) || '');
+  const path = save ? await pickSaveFile(current, filters) : await pickOpenFile(filters);
+  if (path) setVal(fieldId, path);
+}
+
+function bindEvents() {
+  document.getElementById('support-link').addEventListener('click', () => openExternal(SUPPORT_URL));
+  document.getElementById('repo-link').addEventListener('click', () => openExternal(REPO_URL));
+  document.getElementById('copy-setup-btn').addEventListener('click', copySetupGuide);
+
+  document.getElementById('save-config-btn').addEventListener('click', () => saveConfig(true));
+  document.getElementById('models-btn').addEventListener('click', fetchModels);
+  document.getElementById('start-btn').addEventListener('click', startRun);
+  document.getElementById('validate-btn').addEventListener('click', validateRun);
+  document.getElementById('stop-btn').addEventListener('click', stopRun);
+
+  document.getElementById('refresh-projects-btn').addEventListener('click', () => loadProjects(true));
+  document.getElementById('create-project-btn').addEventListener('click', createProject);
+  document.getElementById('save-project-btn').addEventListener('click', () => saveProject(true));
+  document.getElementById('delete-project-btn').addEventListener('click', deleteProject);
+  document.getElementById('save-profile-btn').addEventListener('click', saveProfile);
+  document.getElementById('apply-profile-btn').addEventListener('click', applyProfile);
+
+  document.getElementById('queue-btn').addEventListener('click', queueCurrent);
+  document.getElementById('run-next-btn').addEventListener('click', async () => { await runNextPending(); });
+  document.getElementById('run-all-btn').addEventListener('click', startRunAll);
+  document.getElementById('stop-run-all-btn').addEventListener('click', stopRunAll);
+
+  projectSelectEl.addEventListener('change', async () => {
+    const raw = String(projectSelectEl.value || '').trim();
+    if (!raw) return;
+    await selectProject(Number(raw), null, true);
+  });
+
+  modeEl.addEventListener('change', async () => {
+    if (suppressModeEvent) return;
+    const nextMode = modeNorm(String(modeEl.value || 'translate'));
+    captureCurrentStep();
+    if (currentProjectId != null) {
+      await saveProject(false);
+      await selectProject(currentProjectId, nextMode, false);
+    } else {
+      applyStepToForm(nextMode);
+    }
+  });
+
+  profileSelectEl.addEventListener('change', () => {
+    stepValues[currentMode()].profile_id = selectedProfileId();
+  });
+
+  document.getElementById('pick_new_project_source_btn').addEventListener('click', async () => {
+    await pickIntoField('new_project_source', false, [{ name: 'EPUB', extensions: ['epub'] }]);
+  });
+  document.getElementById('pick_input_epub_btn').addEventListener('click', async () => {
+    await pickIntoField('input_epub', false, [{ name: 'EPUB', extensions: ['epub'] }]);
+  });
+  document.getElementById('pick_output_epub_btn').addEventListener('click', async () => {
+    await pickIntoField('output_epub', true, [{ name: 'EPUB', extensions: ['epub'] }]);
+  });
+  document.getElementById('pick_prompt_btn').addEventListener('click', async () => {
+    await pickIntoField('prompt', false, [{ name: 'TXT', extensions: ['txt'] }]);
+  });
+  document.getElementById('pick_glossary_btn').addEventListener('click', async () => {
+    await pickIntoField('glossary', false, [{ name: 'Text', extensions: ['txt', 'csv', 'json', 'jsonl'] }]);
+  });
+  document.getElementById('pick_cache_btn').addEventListener('click', async () => {
+    await pickIntoField('cache', true, [{ name: 'JSONL', extensions: ['jsonl', 'json'] }]);
+  });
+}
+
+async function init() {
+  renderSetupGuide();
+  bindEvents();
+  setRunAllButtons();
+  await loadConfig();
+  await loadProfiles();
+  await loadProjects(false);
+  await refreshHistory();
+  await pollStatus();
+  setInterval(pollStatus, 1200);
+}
+
+init();

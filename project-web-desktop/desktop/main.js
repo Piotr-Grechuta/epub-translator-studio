@@ -1,4 +1,4 @@
-﻿const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const path = require('path');
 
 function createWindow() {
@@ -24,6 +24,31 @@ app.whenReady().then(() => {
     if (!u) return false;
     await shell.openExternal(u);
     return true;
+  });
+
+  ipcMain.handle('pick-file', async (_event, options = {}) => {
+    const win = BrowserWindow.getFocusedWindow();
+    const filters = Array.isArray(options.filters) ? options.filters : [];
+    const result = await dialog.showOpenDialog(win || undefined, {
+      title: typeof options.title === 'string' ? options.title : 'Wybierz plik',
+      properties: ['openFile'],
+      filters,
+      defaultPath: typeof options.defaultPath === 'string' ? options.defaultPath : undefined,
+    });
+    if (result.canceled || !Array.isArray(result.filePaths) || !result.filePaths.length) return '';
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle('pick-save-file', async (_event, options = {}) => {
+    const win = BrowserWindow.getFocusedWindow();
+    const filters = Array.isArray(options.filters) ? options.filters : [];
+    const result = await dialog.showSaveDialog(win || undefined, {
+      title: typeof options.title === 'string' ? options.title : 'Wybierz plik wynikowy',
+      defaultPath: typeof options.defaultPath === 'string' ? options.defaultPath : undefined,
+      filters,
+    });
+    if (result.canceled || typeof result.filePath !== 'string') return '';
+    return result.filePath;
   });
 
   createWindow();

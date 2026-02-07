@@ -1,13 +1,18 @@
 ﻿# Translator Studio Desktop (Web)
 
-Projekt web/desktop (Electron + FastAPI) z funkcjonalnością operacyjną zbliżoną do wersji Tkinter:
-- konfiguracja parametrów runu,
-- start tłumaczenia,
-- start walidacji EPUB,
+Projekt web/desktop (Electron + FastAPI) z funkcjonalnoscia operacyjna zblizona do wersji Tkinter:
+- konfiguracja parametrow runu,
+- tryb `translate` / `edit` z oddzielnymi sciezkami output/prompt/cache,
+- zarzadzanie projektami (nowy, zapis, wybor, usuniecie),
+- zarzadzanie profilami krokow (zapis i wczytanie),
+- kolejka projektow (`pending`, uruchom nastepny, run-all pending),
+- historia runow per projekt,
+- start tlumaczenia i walidacji EPUB,
 - stop procesu,
 - status procesu i log live,
 - zapis/odczyt konfiguracji,
-- pobieranie list modeli (Ollama/Google).
+- pobieranie list modeli (Ollama/Google),
+- pickery plikow z poziomu okna desktop (bez recznego wpisywania sciezek).
 
 ## Struktura
 - `backend/` API + runner procesu
@@ -31,8 +36,15 @@ W katalogu `project-web-desktop`:
 Frontend zapisuje config do `backend/ui_state.json`.
 Domyślna baza TM: `backend/translator_studio.db`.
 
+## Wersjonowanie
+- Jedno zrodlo wersji: `project-web-desktop/VERSION`
+- Backend API zwraca wersje pod `GET /version`
+- Desktop UI pokazuje te sama wersje w topbar (przez `preload.js`)
+- `desktop/package.json` i `desktop/package-lock.json` sa trzymane w tej samej wersji semver
+
 ## Uwagi
-To jest aktywnie rozwijany wariant webowy. Jeśli chcesz pełną 1:1 parytetową migrację wszystkich zakładek Studio/QA/TM z Tkintera, mogę kontynuować kolejne etapy bez zatrzymywania prac.
+To jest aktywnie rozwijany wariant webowy. Obecna wersja pokrywa glowny workflow projektu (projekt/profil/kolejka/run/log).
+Zakladki QA/TM/Studio Tools z Tkinter nadal wymagaja osobnej migracji.
 
 ## Wariant 0 (wspolny core)
 Backend webowy korzysta ze wspolnego modułu runtime z `project-tkinter/runtime_core.py`.

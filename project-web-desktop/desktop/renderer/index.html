@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="pl">
   <head>
     <meta charset="UTF-8" />
@@ -10,7 +10,7 @@
     <header class="topbar">
       <div>
         <h1>Translator Studio</h1>
-        <p class="sub">Web desktop parity with Tkinter workflow</p>
+        <p class="sub">Web desktop workflow parity with Tkinter</p>
       </div>
       <div class="topbar-right">
         <div class="support-links">
@@ -25,8 +25,7 @@
       <section class="card setup-card">
         <h2>Pierwsze uruchomienie (wymagane)</h2>
         <p class="setup-note">
-          Aby aplikacja dzialala poprawnie, potrzebujesz: (1) Ollama + model dla pracy lokalnej, albo
-          (2) poprawny API key i internet dla providerow online (np. Google Gemini).
+          Potrzebujesz: (1) Ollama + model do pracy lokalnej albo (2) poprawny API key i internet dla providerow online.
         </p>
         <p id="os-hint" class="setup-note"></p>
         <div class="setup-grid">
@@ -49,7 +48,46 @@
       </section>
 
       <section class="card">
-        <h2>Konfiguracja runu</h2>
+        <h2>Projekt i profile</h2>
+        <div class="grid compact">
+          <label>Projekt
+            <select id="project_select"></select>
+          </label>
+          <label>Tryb kroku
+            <select id="mode">
+              <option value="translate">translate</option>
+              <option value="edit">edit</option>
+            </select>
+          </label>
+          <label>Profil kroku
+            <select id="profile_select"></select>
+          </label>
+          <label>Nowy profil (z biezacych ustawien)
+            <input id="new_profile_name" type="text" placeholder="np. Moj profil" />
+          </label>
+          <label>Nazwa nowego projektu
+            <input id="new_project_name" type="text" placeholder="np. Ksiazka 1" />
+          </label>
+          <label>EPUB zrodlowy nowego projektu
+            <div class="with-btn">
+              <input id="new_project_source" type="text" placeholder="C:\\...\\book.epub" />
+              <button id="pick_new_project_source_btn">Wybierz</button>
+            </div>
+          </label>
+        </div>
+        <div class="row actions">
+          <button id="refresh-projects-btn">Odswiez projekty</button>
+          <button id="create-project-btn">Nowy projekt</button>
+          <button id="save-project-btn">Zapisz projekt</button>
+          <button id="delete-project-btn" class="danger">Usun projekt</button>
+          <button id="save-profile-btn">Zapisz jako profil</button>
+          <button id="apply-profile-btn">Wczytaj profil</button>
+        </div>
+        <div id="counts" class="status"></div>
+      </section>
+
+      <section class="card">
+        <h2>Pliki i ustawienia runu</h2>
         <div class="grid">
           <label>Provider
             <select id="provider">
@@ -61,19 +99,34 @@
             <input id="model" type="text" />
           </label>
           <label>Input EPUB
-            <input id="input_epub" type="text" />
+            <div class="with-btn">
+              <input id="input_epub" type="text" />
+              <button id="pick_input_epub_btn">Wybierz</button>
+            </div>
           </label>
           <label>Output EPUB
-            <input id="output_epub" type="text" />
+            <div class="with-btn">
+              <input id="output_epub" type="text" />
+              <button id="pick_output_epub_btn">Wybierz</button>
+            </div>
           </label>
           <label>Prompt
-            <input id="prompt" type="text" />
+            <div class="with-btn">
+              <input id="prompt" type="text" />
+              <button id="pick_prompt_btn">Wybierz</button>
+            </div>
           </label>
           <label>Glossary
-            <input id="glossary" type="text" />
+            <div class="with-btn">
+              <input id="glossary" type="text" />
+              <button id="pick_glossary_btn">Wybierz</button>
+            </div>
           </label>
           <label>Cache
-            <input id="cache" type="text" />
+            <div class="with-btn">
+              <input id="cache" type="text" />
+              <button id="pick_cache_btn">Wybierz</button>
+            </div>
           </label>
           <label>Ollama host
             <input id="ollama_host" type="text" />
@@ -122,19 +175,34 @@
           <label><input id="use_cache" type="checkbox" /> use cache</label>
           <label><input id="use_glossary" type="checkbox" /> use glossary</label>
         </div>
+      </section>
+
+      <section class="card">
+        <h2>Uruchamianie i kolejka</h2>
         <div class="row actions">
-          <button id="save-btn">Zapisz config</button>
+          <button id="save-config-btn">Zapisz config</button>
           <button id="models-btn">Pobierz modele</button>
-          <button id="start-btn" class="primary">Start tłumaczenia</button>
+          <button id="start-btn" class="primary">Start kroku</button>
           <button id="validate-btn">Walidacja EPUB</button>
           <button id="stop-btn" class="danger">Stop</button>
         </div>
+        <div class="row actions">
+          <button id="queue-btn">Kolejkuj</button>
+          <button id="run-next-btn">Uruchom nastepny</button>
+          <button id="run-all-btn">Run all pending</button>
+          <button id="stop-run-all-btn">Stop run-all</button>
+        </div>
+        <div id="status" class="status">Status: --</div>
         <p id="msg" class="msg"></p>
       </section>
 
       <section class="card">
-        <h2>Status i log</h2>
-        <div id="status" class="status">Status: --</div>
+        <h2>Historia projektu</h2>
+        <pre id="history" class="history"></pre>
+      </section>
+
+      <section class="card log-card">
+        <h2>Log procesu</h2>
         <pre id="log" class="log"></pre>
       </section>
     </main>
