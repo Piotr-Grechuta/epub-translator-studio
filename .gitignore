@@ -16,3 +16,5 @@ debug/
 AIza*
 *.key
 *.secret
+
+project-web-desktop/desktop/node_modules/electron/dist/electron.exe
