@@ -96,8 +96,9 @@
             </select>
           </label>
           <label>Model
-            <input id="model" type="text" list="model_list" />
-            <datalist id="model_list"></datalist>
+            <select id="model">
+              <option value="">-- wybierz model --</option>
+            </select>
           </label>
           <label>Input EPUB
             <div class="with-btn">
@@ -208,6 +209,70 @@
       </section>
     </main>
 
+    <script>
+      (() => {
+        try {
+          const setup = {
+            windows: [
+              '# Ollama (lokalnie)',
+              'winget install Ollama.Ollama',
+              'ollama pull llama3.1:8b',
+              '',
+              '# API key (provider online, np. Google Gemini)',
+              'setx GOOGLE_API_KEY "<TWOJ_KLUCZ>"',
+            ],
+            linux: [
+              '# Ollama (lokalnie)',
+              'curl -fsSL https://ollama.com/install.sh | sh',
+              'ollama pull llama3.1:8b',
+              '',
+              '# API key (provider online, np. Google Gemini)',
+              'export GOOGLE_API_KEY="<TWOJ_KLUCZ>"',
+            ],
+            macos: [
+              '# Ollama (lokalnie)',
+              'brew install ollama',
+              'ollama pull llama3.1:8b',
+              '',
+              '# API key (provider online, np. Google Gemini)',
+              'export GOOGLE_API_KEY="<TWOJ_KLUCZ>"',
+            ],
+          };
+          const win = document.getElementById('setup-win');
+          const lin = document.getElementById('setup-linux');
+          const mac = document.getElementById('setup-macos');
+          if (win && !win.textContent.trim()) win.textContent = setup.windows.join('\n');
+          if (lin && !lin.textContent.trim()) lin.textContent = setup.linux.join('\n');
+          if (mac && !mac.textContent.trim()) mac.textContent = setup.macos.join('\n');
+
+          const openUrl = async (url) => {
+            try {
+              if (window.desktopApi && typeof window.desktopApi.openExternal === 'function') {
+                await window.desktopApi.openExternal(url);
+                return;
+              }
+            } catch {}
+            window.open(url, '_blank', 'noopener,noreferrer');
+          };
+          const bindOnce = (id, handler) => {
+            const el = document.getElementById(id);
+            if (!el || el.dataset.fallbackBound === '1') return;
+            el.dataset.fallbackBound = '1';
+            el.addEventListener('click', handler);
+          };
+          bindOnce('support-link', () => openUrl('https://github.com/sponsors/piotrgrechuta-web'));
+          bindOnce('repo-link', () => openUrl('https://github.com/piotrgrechuta-web/epu2pl'));
+          bindOnce('copy-setup-btn', async () => {
+            const text = [
+              'Windows (PowerShell):', ...setup.windows, '', 'Linux:', ...setup.linux, '', 'macOS:', ...setup.macos,
+            ].join('\n');
+            try {
+              await navigator.clipboard.writeText(text);
+            } catch {}
+          });
+        } catch {}
+      })();
+    </script>
     <script src="app.js"></script>
   </body>
 </html>

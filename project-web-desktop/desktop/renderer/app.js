@@ -23,7 +23,7 @@ const setupWinEl = document.getElementById('setup-win');
 const setupLinuxEl = document.getElementById('setup-linux');
 const setupMacEl = document.getElementById('setup-macos');
 const setupHintEl = document.getElementById('os-hint');
-const modelListEl = document.getElementById('model_list');
+const modelEl = document.getElementById('model');
 
 const projectSelectEl = document.getElementById('project_select');
 const modeEl = document.getElementById('mode');
@@ -35,6 +35,15 @@ const APP_INFO = (window.appInfo && typeof window.appInfo === 'object')
   ? window.appInfo
   : { name: 'Translator Studio Desktop', version: '0.0.0', platform: (navigator.platform || '') };
 if (verEl) verEl.textContent = `${APP_INFO.name} v${APP_INFO.version}`;
+
+window.addEventListener('error', (ev) => {
+  const msg = ev?.error?.message || ev?.message || 'Nieznany blad JS';
+  message(`Blad JS: ${msg}`, true);
+});
+window.addEventListener('unhandledrejection', (ev) => {
+  const msg = ev?.reason?.message || String(ev?.reason || 'Nieznany blad Promise');
+  message(`Blad Promise: ${msg}`, true);
+});
 
 let currentProjectId = null;
 let tmDbPath = 'translator_studio.db';
@@ -213,6 +222,10 @@ async function api(path, opts = {}) {
 }
 
 function message(text, isErr = false) {
+  if (!msgEl) {
+    console[isErr ? 'error' : 'log'](text);
+    return;
+  }
   msgEl.textContent = text;
   msgEl.className = isErr ? 'msg err' : 'msg ok';
 }
@@ -267,14 +280,23 @@ async function openExternal(url) {
 }
 
 function renderModelList(models) {
-  if (!modelListEl) return;
+  if (!modelEl) return;
   const list = Array.isArray(models) ? models : [];
-  modelListEl.innerHTML = '';
+  const current = String(val('model') || '').trim();
+  modelEl.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = '-- wybierz model --';
+  modelEl.appendChild(placeholder);
   for (const name of list) {
     const o = document.createElement('option');
     o.value = String(name);
-    modelListEl.appendChild(o);
+    o.textContent = String(name);
+    modelEl.appendChild(o);
   }
+  if (current && list.includes(current)) setVal('model', current);
+  else if (list.length) setVal('model', list[0]);
+  else setVal('model', '');
 }
 
 function refillProfileSelect() {
@@ -628,20 +650,12 @@ async function fetchModels() {
     if (provider === 'ollama') {
       const data = await api(`/models/ollama?host=${encodeURIComponent(String(val('ollama_host') || ''))}`);
       renderModelList(data.models || []);
-      if (data.models?.length) {
-        const current = String(val('model') || '').trim();
-        if (!current || !data.models.includes(current)) setVal('model', data.models[0]);
-      }
       message(`Modele ollama: ${data.models?.length || 0}`);
       return;
     }
     const key = String(val('google_api_key') || '');
     const data = await api(`/models/google?api_key=${encodeURIComponent(key)}`);
     renderModelList(data.models || []);
-    if (data.models?.length) {
-      const current = String(val('model') || '').trim();
-      if (!current || !data.models.includes(current)) setVal('model', data.models[0]);
-    }
     message(`Modele google: ${data.models?.length || 0}`);
   } catch (e) {
     message(`Blad modeli: ${e.message}`, true);
@@ -787,4 +801,10 @@ async function init() {
   }
 }
 
-init();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    init();
+  }, { once: true });
+} else {
+  init();
+}
