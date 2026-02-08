@@ -1,6 +1,6 @@
 # EPUB Translator Studio
 
-[![PR checks](https://github.com/piotrgrechuta-web/epub-translator-studio/actions/workflows/pr-checks.yml/badge.svg?branch=master)](https://github.com/piotrgrechuta-web/epub-translator-studio/actions/workflows/pr-checks.yml)
+[![PR checks](https://github.com/piotrgrechuta-web/epub-translator-studio/actions/workflows/pr-checks.yml/badge.svg?branch=main)](https://github.com/piotrgrechuta-web/epub-translator-studio/actions/workflows/pr-checks.yml)
 [![Release](https://img.shields.io/github/v/release/piotrgrechuta-web/epub-translator-studio?display_name=tag)](https://github.com/piotrgrechuta-web/epub-translator-studio/releases)
 [![License: Personal Use Only](https://img.shields.io/badge/license-Personal%20Use%20Only-red.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](project-tkinter/app_main.py)

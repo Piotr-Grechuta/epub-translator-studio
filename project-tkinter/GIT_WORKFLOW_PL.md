@@ -26,33 +26,33 @@ Dodatkowo skrypt ustawia **dual-push**:
 ## 2. Start pracy (zawsze przed edycja)
 
 ```powershell
-python scripts/git_workflow.py start --branch ep2pl
+python scripts/git_workflow.py start --branch main
 ```
 
 Skrypt zrobi:
 1. `git fetch --prune origin`
-2. `git switch ep2pl`
-3. `git pull --ff-only origin ep2pl`
+2. `git switch main`
+3. `git pull --ff-only origin main`
 
 Czyli masz aktualna wersje online, bez merge-ow przypadkowych.
 
 ## 3. Koniec pracy (publikacja)
 
 ```powershell
-python scripts/git_workflow.py publish --branch ep2pl -m "Twoj opis zmian"
+python scripts/git_workflow.py publish --branch main -m "Twoj opis zmian"
 ```
 
 Skrypt zrobi:
 1. `fetch` + `switch`
-2. sprawdzenie czy nie jestes za `origin/ep2pl`
+2. sprawdzenie czy nie jestes za `origin/main`
 3. `git add -A`
 4. `git commit -m "..."`
-5. `git push origin ep2pl` (po `setup`: automatycznie na `origin` i `backup`)
+5. `git push origin main` (po `setup`: automatycznie na `origin` i `backup`)
 
 ## 4. Szybki podglad statusu
 
 ```powershell
-python scripts/git_workflow.py status --branch ep2pl --fetch
+python scripts/git_workflow.py status --branch main --fetch
 ```
 
 ## 5. Minimalny rytm dnia

@@ -3,7 +3,7 @@
 ## Model pracy
 
 Najprostszy i najbezpieczniejszy model:
-- jedna aktywna galaz robocza: `ep2pl`,
+- jedna aktywna galaz robocza: `main`,
 - zawsze `pull` przed praca,
 - zawsze `push` po zakonczonej sesji.
 
@@ -12,7 +12,7 @@ Najprostszy i najbezpieczniejszy model:
 ### Start sesji
 
 ```powershell
-git checkout ep2pl
+git checkout main
 git pull --rebase
 ```
 
@@ -59,7 +59,7 @@ Jesli chcesz wyrownac lokalne repo do zdalnego i zachowac kopie zmian:
 ```powershell
 git stash push -u -m "backup"
 git fetch origin
-git reset --hard origin/ep2pl
+git reset --hard origin/main
 git clean -fd
 ```
 
