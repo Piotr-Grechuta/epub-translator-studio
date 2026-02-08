@@ -1,0 +1,61 @@
+name: PR checks
+
+on:
+  push:
+    branches:
+      - master
+      - ep2pl
+  pull_request:
+    branches:
+      - master
+      - ep2pl
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install lint tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8
+
+      - name: Lint (critical errors only)
+        run: |
+          flake8 project-tkinter project-web-desktop/backend \
+            --select=E9,F63,F7,F82 \
+            --count \
+            --show-source \
+            --statistics \
+            --exclude=.venv,venv,node_modules,__pycache__,build,dist
+
+      - name: Entry-point syntax smoke
+        run: |
+          python -m py_compile project-tkinter/start.py
+          python -m py_compile project-web-desktop/backend/app.py
+
+  desktop-manifest-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate desktop package manifests
+        run: |
+          node -e "const fs=require('fs'); const read=(p)=>fs.readFileSync(p,'utf8').replace(/^\uFEFF/, ''); JSON.parse(read('project-web-desktop/desktop/package.json')); JSON.parse(read('project-web-desktop/desktop/package-lock.json')); console.log('Desktop package manifests are valid JSON.');"

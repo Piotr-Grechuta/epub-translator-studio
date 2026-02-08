@@ -143,8 +143,6 @@ class TranslatorGUI:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(APP_TITLE)
-        self.root.geometry("1200x820")
-        self.root.minsize(1000, 700)
 
         self.workdir = Path(__file__).resolve().parent
         self.events_log_path = self.workdir / "events" / "app_events.jsonl"
@@ -175,10 +173,17 @@ class TranslatorGUI:
         self._tooltips: List[Any] = []
         self.tooltip_mode = mode_raw
         self._projects_refresh_seq = 0
+        self._root_scroll_canvas: Optional[tk.Canvas] = None
+        self._root_scroll_window: Optional[int] = None
+        self._root_scroll_frame: Optional[ttk.Frame] = None
+        self._context_menu: Optional[tk.Menu] = None
+        self._context_target: Optional[tk.Misc] = None
 
+        self._configure_main_window()
         self._setup_theme()
         self._build_vars()
         self._build_ui()
+        self._install_context_menu()
         self._install_tooltips()
         self.db.import_legacy_gui_settings(SETTINGS_FILE)
         self._load_defaults()
@@ -209,6 +214,181 @@ class TranslatorGUI:
         style.configure("StatusRun.TLabel", background="#eef3f7", foreground="#b45309", font=("Segoe UI Semibold", 10))
         style.configure("StatusOk.TLabel", background="#eef3f7", foreground="#166534", font=("Segoe UI Semibold", 10))
         style.configure("StatusErr.TLabel", background="#eef3f7", foreground="#b91c1c", font=("Segoe UI Semibold", 10))
+
+    def _configure_main_window(self) -> None:
+        self._configure_window_bounds(self.root, preferred_w=1200, preferred_h=820, min_w=760, min_h=520, maximize=True)
+
+    def _configure_window_bounds(
+        self,
+        win: tk.Misc,
+        *,
+        preferred_w: int,
+        preferred_h: int,
+        min_w: int,
+        min_h: int,
+        maximize: bool = False,
+    ) -> None:
+        screen_w = max(1024, int(self.root.winfo_screenwidth() or 1200))
+        screen_h = max(720, int(self.root.winfo_screenheight() or 820))
+
+        eff_min_w = min(max(520, int(screen_w - 120)), max(480, int(min_w)))
+        eff_min_h = min(max(400, int(screen_h - 140)), max(360, int(min_h)))
+        pref_w = min(max(eff_min_w, int(preferred_w)), max(900, screen_w - 40))
+        pref_h = min(max(eff_min_h, int(preferred_h)), max(650, screen_h - 80))
+        x = max(0, (screen_w - pref_w) // 2)
+        y = max(0, (screen_h - pref_h) // 2)
+
+        try:
+            win.geometry(f"{pref_w}x{pref_h}+{x}+{y}")  # type: ignore[attr-defined]
+        except Exception:
+            return
+        try:
+            win.minsize(eff_min_w, eff_min_h)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        if not maximize:
+            return
+        try:
+            win.state("zoomed")  # type: ignore[attr-defined]
+            return
+        except Exception:
+            pass
+        try:
+            win.attributes("-zoomed", True)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+    def _create_scrollable_root(self, *, padding: int = 16) -> ttk.Frame:
+        shell = ttk.Frame(self.root)
+        shell.pack(fill="both", expand=True)
+        shell.columnconfigure(0, weight=1)
+        shell.rowconfigure(0, weight=1)
+
+        bg = str(self.root.cget("bg") or "#eef3f7")
+        canvas = tk.Canvas(shell, highlightthickness=0, borderwidth=0, background=bg)
+        vbar = ttk.Scrollbar(shell, orient="vertical", command=canvas.yview)
+        hbar = ttk.Scrollbar(shell, orient="horizontal", command=canvas.xview)
+        canvas.configure(yscrollcommand=vbar.set, xscrollcommand=hbar.set)
+
+        canvas.grid(row=0, column=0, sticky="nsew")
+        vbar.grid(row=0, column=1, sticky="ns")
+        hbar.grid(row=1, column=0, sticky="ew")
+
+        frame = ttk.Frame(canvas, padding=padding)
+        window_id = canvas.create_window((0, 0), window=frame, anchor="nw")
+
+        def _sync_layout(_: Optional[tk.Event] = None) -> None:
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            req_w = max(1, int(frame.winfo_reqwidth()))
+            can_w = max(1, int(canvas.winfo_width()))
+            # Keep full-width layout when there is space; allow horizontal scroll when window is too narrow.
+            canvas.itemconfigure(window_id, width=can_w if req_w <= can_w else req_w)
+
+        frame.bind("<Configure>", _sync_layout)
+        canvas.bind("<Configure>", _sync_layout)
+
+        self._root_scroll_canvas = canvas
+        self._root_scroll_window = int(window_id)
+        self._root_scroll_frame = frame
+        return frame
+
+    def _install_context_menu(self) -> None:
+        menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(label="Cofnij", command=lambda: self._context_emit("<<Undo>>"))
+        menu.add_command(label="Ponow", command=lambda: self._context_emit("<<Redo>>"))
+        menu.add_separator()
+        menu.add_command(label="Wytnij", command=lambda: self._context_emit("<<Cut>>"))
+        menu.add_command(label="Kopiuj", command=lambda: self._context_emit("<<Copy>>"))
+        menu.add_command(label="Wklej", command=lambda: self._context_emit("<<Paste>>"))
+        menu.add_command(label="Usun", command=lambda: self._context_emit("<<Clear>>"))
+        menu.add_separator()
+        menu.add_command(label="Zaznacz wszystko", command=self._context_select_all)
+        menu.add_command(label="Wyczysc pole", command=self._context_clear_field)
+
+        self._context_menu = menu
+        for cls in ("Entry", "TEntry", "Text", "TCombobox", "Spinbox", "TSpinbox", "Listbox"):
+            self.root.bind_class(cls, "<Button-3>", self._show_context_menu, add="+")
+            self.root.bind_class(cls, "<Shift-F10>", self._show_context_menu_keyboard, add="+")
+            self.root.bind_class(cls, "<Control-a>", self._context_select_all_event, add="+")
+            self.root.bind_class(cls, "<Control-A>", self._context_select_all_event, add="+")
+
+    def _show_context_menu(self, event: tk.Event) -> str:
+        if self._context_menu is None:
+            return "break"
+        widget = event.widget if isinstance(event.widget, tk.Misc) else None
+        if widget is None:
+            return "break"
+        self._context_target = widget
+        try:
+            widget.focus_set()
+        except Exception:
+            pass
+        try:
+            self._context_menu.tk_popup(int(event.x_root), int(event.y_root))
+        finally:
+            self._context_menu.grab_release()
+        return "break"
+
+    def _show_context_menu_keyboard(self, event: tk.Event) -> str:
+        widget = event.widget if isinstance(event.widget, tk.Misc) else None
+        if widget is None:
+            return "break"
+        if self._context_menu is None:
+            return "break"
+        self._context_target = widget
+        x = widget.winfo_rootx() + max(8, int(widget.winfo_width() * 0.2))
+        y = widget.winfo_rooty() + max(8, int(widget.winfo_height() * 0.8))
+        try:
+            self._context_menu.tk_popup(x, y)
+        finally:
+            self._context_menu.grab_release()
+        return "break"
+
+    def _context_emit(self, sequence: str) -> None:
+        widget = self._context_target
+        if widget is None:
+            return
+        try:
+            widget.event_generate(sequence)
+        except Exception:
+            pass
+
+    def _context_select_all(self) -> None:
+        widget = self._context_target
+        if widget is None:
+            return
+        cls = str(widget.winfo_class())
+        try:
+            if cls in {"Entry", "TEntry", "TCombobox", "Spinbox", "TSpinbox"}:
+                widget.selection_range(0, "end")  # type: ignore[attr-defined]
+                widget.icursor("end")  # type: ignore[attr-defined]
+            elif cls == "Text":
+                widget.tag_add("sel", "1.0", "end-1c")  # type: ignore[attr-defined]
+            elif cls == "Listbox":
+                widget.selection_set(0, "end")  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+    def _context_select_all_event(self, event: tk.Event) -> str:
+        widget = event.widget if isinstance(event.widget, tk.Misc) else None
+        if widget is None:
+            return "break"
+        self._context_target = widget
+        self._context_select_all()
+        return "break"
+
+    def _context_clear_field(self) -> None:
+        widget = self._context_target
+        if widget is None:
+            return
+        cls = str(widget.winfo_class())
+        try:
+            if cls in {"Entry", "TEntry", "TCombobox", "Spinbox", "TSpinbox"}:
+                widget.delete(0, "end")  # type: ignore[attr-defined]
+            elif cls == "Text":
+                widget.delete("1.0", "end")  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
     def tr(self, key: str, default: str, **fmt: Any) -> str:
         return self.i18n.t(key, default, **fmt)
@@ -269,8 +449,7 @@ class TranslatorGUI:
 
     def _build_ui(self) -> None:
         self.root.title(self.tr("app.title", APP_TITLE))
-        outer = ttk.Frame(self.root, padding=16)
-        outer.pack(fill="both", expand=True)
+        outer = self._create_scrollable_root(padding=16)
 
         ttk.Label(outer, text=self.tr("app.title", APP_TITLE), style="Title.TLabel").pack(anchor="w")
         ttk.Label(
@@ -878,7 +1057,7 @@ class TranslatorGUI:
                 db = ProjectDB(SQLITE_FILE)
                 try:
                     escalated = db.escalate_overdue_findings()
-                    rows = db.list_projects()
+                    rows = db.list_projects_with_stage_summary()
                 finally:
                     db.close()
             except Exception:
@@ -922,9 +1101,41 @@ class TranslatorGUI:
         self._on_project_selected()
         self._refresh_status_panel(rows)
 
+    def _stage_status_label(self, value: str) -> str:
+        m = {
+            "none": "-",
+            "ok": "ok",
+            "error": "err",
+            "running": "run",
+            "pending": "q",
+        }
+        key = str(value or "none").strip().lower()
+        return m.get(key, key or "-")
+
+    def _next_action_label(self, value: str) -> str:
+        m = {
+            "done": "koniec",
+            "translate": "T",
+            "translate_retry": "T!",
+            "edit": "R",
+            "edit_retry": "R!",
+            "running:translate": "run T",
+            "running:edit": "run R",
+            "pending:translate": "q T",
+            "pending:edit": "q R",
+        }
+        key = str(value or "").strip().lower()
+        return m.get(key, key or "-")
+
+    def _short_text(self, value: str, max_len: int = 42) -> str:
+        text = str(value or "").strip()
+        if max_len <= 3 or len(text) <= max_len:
+            return text
+        return text[: max_len - 3] + "..."
+
     def _refresh_status_panel(self, rows: Optional[List[Any]] = None) -> None:
         if rows is None:
-            rows = self.db.list_projects()
+            rows = self.db.list_projects_with_stage_summary()
         counts = {"idle": 0, "pending": 0, "running": 0, "error": 0}
         self.status_list.delete(0, "end")
         for r in rows:
@@ -936,9 +1147,25 @@ class TranslatorGUI:
             else:
                 counts.setdefault(st, 0)
                 counts[st] += 1
-            name = str(r["name"])
-            step = str(r["active_step"] or "-")
-            self.status_list.insert("end", f"{name} | {st} | step={step}")
+            name = str(r.get("name") or "-")
+            step = str(r.get("active_step") or "-")
+            book = str(r.get("book") or "-")
+            name_short = self._short_text(name, 34)
+            book_short = self._short_text(book, 44)
+            tr = r.get("translate") if isinstance(r.get("translate"), dict) else {}
+            ed = r.get("edit") if isinstance(r.get("edit"), dict) else {}
+            t_done = int(tr.get("done", 0) or 0)
+            t_total = int(tr.get("total", 0) or 0)
+            r_done = int(ed.get("done", 0) or 0)
+            r_total = int(ed.get("total", 0) or 0)
+            t_status = self._stage_status_label(str(tr.get("status", "none")))
+            r_status = self._stage_status_label(str(ed.get("status", "none")))
+            next_action = self._next_action_label(str(r.get("next_action") or ""))
+            self.status_list.insert(
+                "end",
+                f"{name_short} | {st}/{step} | ks={book_short} | T:{t_done}/{t_total} {t_status} | "
+                f"R:{r_done}/{r_total} {r_status} | -> {next_action}",
+            )
         self.status_counts_var.set(
             f"idle={counts.get('idle',0)} | pending={counts.get('pending',0)} | "
             f"running={counts.get('running',0)} | error={counts.get('error',0)}"
@@ -1791,7 +2018,8 @@ class TranslatorGUI:
 
                 self.root.after(0, lambda: self._set_models(models))
             except Exception as e:
-                self.root.after(0, lambda: self.model_status.configure(text=f"Błąd: {e}"))
+                err_text = str(e)
+                self.root.after(0, lambda msg=err_text: self.model_status.configure(text=f"Błąd: {msg}"))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2402,8 +2630,7 @@ class TextEditorWindow:
         self.epub_path = epub_path
         self.win = tk.Toplevel(gui.root)
         self.win.title(self.gui.tr("editor.window_title", "EPUB text editor - {name}", name=epub_path.name))
-        self.win.geometry("1200x760")
-        self.win.minsize(1000, 650)
+        self.gui._configure_window_bounds(self.win, preferred_w=1200, preferred_h=760, min_w=760, min_h=520, maximize=True)
 
         self.chapter_entries = list_chapters(epub_path)
         self.current_chapter_path: Optional[str] = None
