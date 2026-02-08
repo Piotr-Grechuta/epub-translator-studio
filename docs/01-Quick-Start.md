@@ -17,7 +17,7 @@ Ta sekcja daje minimalna sciezke uruchomienia aplikacji Tkinter (glowna aplikacj
 ```powershell
 git clone https://github.com/piotrgrechuta-web/epub-translator-studio.git
 cd epub-translator-studio
-git checkout ep2pl
+git checkout main
 git pull
 ```
 

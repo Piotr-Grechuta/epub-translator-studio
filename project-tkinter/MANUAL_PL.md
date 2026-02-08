@@ -665,8 +665,8 @@ W repo jest gotowa automatyzacja:
 
 Najkrotsza wersja:
 1. raz na komputer: `python scripts/git_workflow.py setup`
-2. start dnia: `python scripts/git_workflow.py start --branch ep2pl`
-3. publikacja: `python scripts/git_workflow.py publish --branch ep2pl -m "opis zmian"`
+2. start dnia: `python scripts/git_workflow.py start --branch main`
+3. publikacja: `python scripts/git_workflow.py publish --branch main -m "opis zmian"`
 
 ## 13. Wsparcie projektu
 

@@ -189,16 +189,16 @@ def build_parser() -> argparse.ArgumentParser:
     ps.set_defaults(func=cmd_setup)
 
     pst = sub.add_parser("start", help="Start dnia: fetch + switch + pull --ff-only.")
-    pst.add_argument("--branch", default="ep2pl", help="Nazwa brancha roboczego (domyslnie: ep2pl).")
+    pst.add_argument("--branch", default="main", help="Nazwa brancha roboczego (domyslnie: main).")
     pst.set_defaults(func=cmd_start)
 
     pp = sub.add_parser("publish", help="Publikacja: add + commit + push.")
-    pp.add_argument("--branch", default="ep2pl", help="Nazwa brancha roboczego (domyslnie: ep2pl).")
+    pp.add_argument("--branch", default="main", help="Nazwa brancha roboczego (domyslnie: main).")
     pp.add_argument("-m", "--message", required=True, help="Wiadomosc commitu.")
     pp.set_defaults(func=cmd_publish)
 
     pss = sub.add_parser("status", help="Szybki status + ahead/behind.")
-    pss.add_argument("--branch", default="ep2pl", help="Branch referencyjny origin (domyslnie: ep2pl).")
+    pss.add_argument("--branch", default="main", help="Branch referencyjny origin (domyslnie: main).")
     pss.add_argument("--fetch", action="store_true", help="Najpierw wykonaj fetch --prune origin.")
     pss.set_defaults(func=cmd_status)
 

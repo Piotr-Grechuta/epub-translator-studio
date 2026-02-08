@@ -7,8 +7,8 @@
 Plik: `.github/workflows/pr-checks.yml`
 
 Uruchamia sie na:
-- `push` do `master` i `ep2pl`,
-- `pull_request` do `master` i `ep2pl`,
+- `push` do `main` (oraz tymczasowo `master` w trakcie migracji),
+- `pull_request` do `main` (oraz tymczasowo `master` w trakcie migracji),
 - recznie (`workflow_dispatch`).
 
 Sprawdza:
@@ -27,7 +27,7 @@ Wymusza jakosc opisu PR:
 
 ## 5.2. Ochrona galezi
 
-Aktywna na `master` i `ep2pl`:
+Aktywna docelowo na `main`:
 - PR wymagany,
 - minimum 1 approval,
 - status checks wymagane,

@@ -4,8 +4,8 @@ on:
   pull_request:
     types: [opened, edited, reopened, synchronize, ready_for_review]
     branches:
+      - main
       - master
-      - ep2pl
 
 permissions:
   contents: read
