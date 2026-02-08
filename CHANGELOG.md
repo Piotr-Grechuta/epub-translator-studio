@@ -21,6 +21,8 @@ All notable changes to this project are documented in this file.
   - segment-state ledger in SQLite (`segment_ledger`) with statuses `PENDING/PROCESSING/COMPLETED/ERROR`,
   - run-step scoping for ledger (`--run-step`),
   - hard-gate `EPUBCheck` option in Tkinter run panel.
+  - ledger pre-seeding (all project segments are initialized upfront as `PENDING`),
+  - scope pruning for ledger rows no longer present in current EPUB source.
 
 ### Changed
 - Naming cleanup (repo alignment):
@@ -45,12 +47,18 @@ All notable changes to this project are documented in this file.
   - `docs/README.md`,
   - `docs/index.md`.
 - `project-tkinter/studio_suite.py`:
-  - segment editor save now preserves inline tags/attributes (non-flattening text update).
+  - segment editor save now preserves inline tags/attributes (non-flattening text update),
+  - search/replace apply now preserves inline tags instead of flattening segment XML.
+- `project-tkinter/app_gui_classic.py`:
+  - EPUBCheck gate now parses `FATAL/ERROR/WARNING` findings and blocks finalization on any `FATAL/ERROR`,
+  - added QA severity gate (`fatal/error`) before final run success,
+  - Text Editor now uses immutable inline-tag tokens (`[[TAG001]]`) and blocks destructive edits inside tag tokens.
 
 ### Fixed
 - Self-healing DB schema integrity for drifted local databases
   (including case: `schema_version=8` but missing `projects.series_id`/`volume_no`).
 - `smoke_gui` startup regression caused by missing `series_id` column on old DB files.
+- Classic text editor no longer flattens inline XHTML tags on save; segment updates preserve markup structure.
 
 ### Security
 - TODO

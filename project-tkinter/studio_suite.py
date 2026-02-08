@@ -634,9 +634,7 @@ class StudioSuiteWindow:
                 if i < len(segs):
                     el = segs[i]
                     txt = _txt(el).replace(f, r)
-                    for c in list(el):
-                        el.remove(c)
-                    el.text = txt
+                    set_text_preserving_inline(el, txt)
             _, bak = save_chapter_changes(tgt, ch, root)
             last_bak = bak
         if last_bak:

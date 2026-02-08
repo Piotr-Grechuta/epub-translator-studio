@@ -669,6 +669,35 @@ class ProjectDB:
             return False, "QA rejected"
         return False, f"QA review status: {status or 'pending'}"
 
+    def qa_severity_gate_status(
+        self,
+        project_id: int,
+        step: str,
+        severities: Tuple[str, ...] = ("fatal", "error"),
+    ) -> Tuple[bool, str]:
+        normalized = [str(x or "").strip().lower() for x in severities if str(x or "").strip()]
+        if not normalized:
+            return True, "Brak severity do gate"
+        placeholders = ",".join(["?"] * len(normalized))
+        args: List[Any] = [project_id, step]
+        args.extend(normalized)
+        row = self.conn.execute(
+            f"""
+            SELECT COUNT(*) c
+            FROM qa_findings
+            WHERE project_id = ?
+              AND step = ?
+              AND status IN ('open','in_progress')
+              AND lower(severity) IN ({placeholders})
+            """,
+            tuple(args),
+        ).fetchone()
+        count = int(row["c"]) if row else 0
+        if count > 0:
+            sev_label = "/".join(normalized)
+            return False, f"Otwartych findings {sev_label}: {count}"
+        return True, "Brak otwartych findings high-severity"
+
     def _ensure_default_profiles(self) -> None:
         now = _now_ts()
         defaults = [
@@ -1397,5 +1426,4 @@ class ProjectDB:
         self.set_setting("active_project_id", project_id)
         self.set_setting("legacy_imported_v1", True)
         return project_id
-
 

@@ -6,7 +6,8 @@
 - `M2`: zrealizowane.
 - `M3`: w toku (Wiki backend do domkniecia).
 - `M7`: uruchomiony szkielet techniczny (seria + slownik serii + auto-detekcja + merge glosariusza).
-- `M4-M6`: plan zatwierdzony, wdrozenie po domknieciu M3.
+- `M4`: w realizacji (ledger orchestration upfront + twardy gate EPUBCheck + tokenized inline editor).
+- `M5-M6`: plan zatwierdzony, kolejne incrementy po domknieciu M3/M4.
 
 ## 7.1. Priorytety techniczne
 
