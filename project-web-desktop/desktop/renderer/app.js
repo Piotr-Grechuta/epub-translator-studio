@@ -17,6 +17,7 @@ const verEl = document.getElementById('ver');
 const msgEl = document.getElementById('msg');
 const statusEl = document.getElementById('status');
 const countsEl = document.getElementById('counts');
+const projectSummaryEl = document.getElementById('project_summary');
 const logEl = document.getElementById('log');
 const historyEl = document.getElementById('history');
 const setupWinEl = document.getElementById('setup-win');
@@ -243,6 +244,52 @@ function updateCounts(counts) {
   countsEl.textContent = `idle=${c.idle || 0} | pending=${c.pending || 0} | running=${c.running || 0} | error=${c.error || 0}`;
 }
 
+function stageStatusLabel(status) {
+  const s = String(status || 'none').toLowerCase();
+  if (s === 'ok') return 'ok';
+  if (s === 'error') return 'blad';
+  if (s === 'running') return 'run';
+  if (s === 'pending') return 'kolejka';
+  return '-';
+}
+
+function nextActionLabel(action) {
+  const a = String(action || '').toLowerCase();
+  const map = {
+    done: 'zakonczone',
+    translate: 'uruchom translate',
+    translate_retry: 'ponow translate',
+    edit: 'uruchom edit',
+    edit_retry: 'ponow edit',
+    'running:translate': 'trwa translate',
+    'running:edit': 'trwa edit',
+    'pending:translate': 'kolejka translate',
+    'pending:edit': 'kolejka edit',
+  };
+  return map[a] || a || '-';
+}
+
+function projectSummaryText(project) {
+  const p = project || {};
+  const tr = p.translate || {};
+  const ed = p.edit || {};
+  const book = String(p.book || '-');
+  const tDone = Number(tr.done || 0);
+  const tTotal = Number(tr.total || 0);
+  const eDone = Number(ed.done || 0);
+  const eTotal = Number(ed.total || 0);
+  return `book=${book} | T=${tDone}/${tTotal}(${stageStatusLabel(tr.status)}) | R=${eDone}/${eTotal}(${stageStatusLabel(ed.status)}) | dalej=${nextActionLabel(p.next_action)}`;
+}
+
+function renderProjectSummary(project) {
+  if (!projectSummaryEl) return;
+  if (!project) {
+    projectSummaryEl.textContent = '';
+    return;
+  }
+  projectSummaryEl.textContent = projectSummaryText(project);
+}
+
 function setRunAllButtons() {
   if (!runAllBtn || !stopRunAllBtn) return;
   runAllBtn.disabled = runAllActive;
@@ -356,12 +403,13 @@ async function loadProjects(keepSelection = true) {
     for (const p of list) {
       const o = document.createElement('option');
       o.value = String(p.id);
-      o.textContent = `${p.name} | ${p.status} | step=${p.active_step}`;
+      o.textContent = `${p.name} | ${p.status} | step=${p.active_step} | ${projectSummaryText(p)}`;
       projectSelectEl.appendChild(o);
     }
     updateCounts(data.counts || {});
     if (!list.length) {
       currentProjectId = null;
+      renderProjectSummary(null);
       renderHistory([]);
       return;
     }
@@ -405,6 +453,7 @@ async function selectProject(projectId, modeOverride = null, announce = true) {
     currentProjectId = Number(project.id);
     projectSelectEl.value = String(currentProjectId);
     consumeProjectStepValues(project);
+    renderProjectSummary(project);
     applyState(data.state || {});
     applyStepToForm(currentMode());
     renderHistory(data.runs || []);

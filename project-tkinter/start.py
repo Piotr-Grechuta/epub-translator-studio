@@ -878,7 +878,7 @@ class TranslatorGUI:
                 db = ProjectDB(SQLITE_FILE)
                 try:
                     escalated = db.escalate_overdue_findings()
-                    rows = db.list_projects()
+                    rows = db.list_projects_with_stage_summary()
                 finally:
                     db.close()
             except Exception:
@@ -922,9 +922,35 @@ class TranslatorGUI:
         self._on_project_selected()
         self._refresh_status_panel(rows)
 
+    def _stage_status_label(self, value: str) -> str:
+        m = {
+            "none": "-",
+            "ok": "ok",
+            "error": "blad",
+            "running": "run",
+            "pending": "kolejka",
+        }
+        key = str(value or "none").strip().lower()
+        return m.get(key, key or "-")
+
+    def _next_action_label(self, value: str) -> str:
+        m = {
+            "done": "zakonczone",
+            "translate": "uruchom translate",
+            "translate_retry": "ponow translate",
+            "edit": "uruchom edit",
+            "edit_retry": "ponow edit",
+            "running:translate": "trwa translate",
+            "running:edit": "trwa edit",
+            "pending:translate": "kolejka translate",
+            "pending:edit": "kolejka edit",
+        }
+        key = str(value or "").strip().lower()
+        return m.get(key, key or "-")
+
     def _refresh_status_panel(self, rows: Optional[List[Any]] = None) -> None:
         if rows is None:
-            rows = self.db.list_projects()
+            rows = self.db.list_projects_with_stage_summary()
         counts = {"idle": 0, "pending": 0, "running": 0, "error": 0}
         self.status_list.delete(0, "end")
         for r in rows:
@@ -936,9 +962,23 @@ class TranslatorGUI:
             else:
                 counts.setdefault(st, 0)
                 counts[st] += 1
-            name = str(r["name"])
-            step = str(r["active_step"] or "-")
-            self.status_list.insert("end", f"{name} | {st} | step={step}")
+            name = str(r.get("name") or "-")
+            step = str(r.get("active_step") or "-")
+            book = str(r.get("book") or "-")
+            tr = r.get("translate") if isinstance(r.get("translate"), dict) else {}
+            ed = r.get("edit") if isinstance(r.get("edit"), dict) else {}
+            t_done = int(tr.get("done", 0) or 0)
+            t_total = int(tr.get("total", 0) or 0)
+            r_done = int(ed.get("done", 0) or 0)
+            r_total = int(ed.get("total", 0) or 0)
+            t_status = self._stage_status_label(str(tr.get("status", "none")))
+            r_status = self._stage_status_label(str(ed.get("status", "none")))
+            next_action = self._next_action_label(str(r.get("next_action") or ""))
+            self.status_list.insert(
+                "end",
+                f"{name} | {st} | step={step} | book={book} | T={t_done}/{t_total}({t_status}) | "
+                f"R={r_done}/{r_total}({r_status}) | dalej={next_action}",
+            )
         self.status_counts_var.set(
             f"idle={counts.get('idle',0)} | pending={counts.get('pending',0)} | "
             f"running={counts.get('running',0)} | error={counts.get('error',0)}"
