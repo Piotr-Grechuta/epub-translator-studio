@@ -4,7 +4,7 @@ Status:
 - `M1 wdrozone` w kodzie i dokumentacji (2026-02-08),
 - `M2 wdrozone` w kodzie i CI (2026-02-08),
 - `M3 w toku`: Issue 8 i 9 `zrealizowane`, Issue 7 `do domkniecia` (inicjalizacja Wiki backend),
-- `M4 plan zatwierdzony`: memory-first translation (cache + decision memory + adaptive prompting),
+- `M4 w realizacji`: memory-first translation (cache + decision memory + adaptive prompting),
 - `M5 plan zatwierdzony`: EPUB-aware segmentacja i integralnosc markup (`&shy;`, inline tags),
 - `M6 plan zatwierdzony`: diff-aware retranslation + semantic diff gate do recenzji,
 - `M7 w realizacji`: wdrozony szkielet serii (project->series, baza serii, manager terminow, merge glosariusza).
@@ -89,7 +89,12 @@ Status M3: `w toku` (2/3 issue zamkniete).
   - `/wiki` dziala bez przekierowania na strone repo,
   - wiki ma minimum 1 strone i sidebar.
 
-Status: `w toku` (backend Wiki wymaga inicjalizacji pierwszej strony `Home`).
+Status: `w toku` (backend Wiki wymaga inicjalizacji pierwszej strony `Home` przez UI GitHub).
+
+Postep:
+- gotowy pakiet stron wiki w repo: `docs/wiki/Home.md`, `docs/wiki/_Sidebar.md`, `docs/wiki/Workflow-and-Recovery.md`,
+- gotowy skrypt publikacji: `project-tkinter/scripts/publish_wiki.ps1`,
+- po jednorazowej inicjalizacji backendu Wiki (klik w UI) publikacja idzie automatycznie skryptem.
 
 ### Issue 8: Release checklist i changelog discipline
 - Zakres:
@@ -111,7 +116,7 @@ Status: `zrealizowane`.
 
 ## M4: Memory-First Translation Engine
 
-Status M4: `plan`.
+Status M4: `w realizacji`.
 
 ### Issue #26: Segment cache + hash reuse (book memory)
 - Zakres:
@@ -122,6 +127,15 @@ Status M4: `plan`.
   - ponowny run tej samej ksiazki reuzywa gotowe segmenty,
   - cache jest odporny na restart aplikacji,
   - metryki cache sa widoczne w podsumowaniu runu.
+
+Status:
+- `czesc wdrozona`:
+1. ledger segmentow jest seedowany upfront dla calego EPUB (`PENDING` dla calego zakresu),
+2. restart runu korzysta z ledgera (`COMPLETED`) bez utraty idempotentnosci,
+3. ledger jest czyszczony z nieaktualnych segmentow po zmianie zrodla.
+- `do domkniecia`:
+1. dopiac eksport metryk ledgera do widoku release notes (obecnie dashboard + runtime),
+2. rozszerzyc telemetry o histogram retry/timeouts per provider.
 
 ### Issue #27: Human-in-the-loop decision memory + adaptive few-shot
 - Zakres:
@@ -146,6 +160,15 @@ Status M5: `plan`.
   - brak rozcietych dialogow i uszkodzen struktury XHTML po segmentacji,
   - testy parsera przechodza dla przypadkow dialog/cytat/inline,
   - output zachowuje poprawnosc renderingu.
+
+Status:
+- `czesc wdrozona`:
+1. edytor klasyczny ma tokeny inline (`[[TAG###]]`) z blokada modyfikacji tagow,
+2. zapis segmentu nie splaszcza juz struktury inline XHTML.
+3. dodano regresyjny test nested-inline (`test_text_preserve_keeps_nested_inline_tags`).
+- `do domkniecia`:
+1. tokenizacja na poziomie nested-inline chips z granularna edycja tylko tekstu miedzy tokenami,
+2. dodatkowe testy regresji dla bardziej zlozonych kombinacji nested inline tags.
 
 ### Issue #33: Ochrona `&shy;` i encji typograficznych
 - Zakres:

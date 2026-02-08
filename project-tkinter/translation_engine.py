@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from html.entities import name2codepoint
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple, Protocol
+from typing import Dict, Iterable, List, Optional, Set, Tuple, Protocol
 
 import requests
 from requests.exceptions import ReadTimeout, ConnectionError as ReqConnectionError, HTTPError
@@ -1116,6 +1116,15 @@ class ProjectTotals:
 
 
 @dataclass
+class LedgerSeedSummary:
+    total_segments: int
+    completed_segments: int
+    cached_segments: int
+    upserted_segments: int
+    pruned_segments: int
+
+
+@dataclass
 class ValidationTotals:
     spine_files: int = 0
     checked_files: int = 0
@@ -1365,10 +1374,43 @@ class SegmentLedger:
                 out[key] = row
         return out
 
-    def ensure_pending(self, chapter_path: str, segment_id: str, source_text: str) -> None:
-        now = int(time.time())
+    def load_scope_states(self) -> Dict[str, sqlite3.Row]:
+        rows = self.conn.execute(
+            """
+            SELECT *
+            FROM segment_ledger
+            WHERE project_id = ? AND run_step = ?
+            """,
+            (self.project_id, self.run_step),
+        ).fetchall()
+        out: Dict[str, sqlite3.Row] = {}
+        for row in rows:
+            key = str(row["segment_hash"] or "").strip()
+            if key:
+                out[key] = row
+        return out
+
+    def _pending_row_tuple(self, chapter_path: str, segment_id: str, source_text: str, now: int) -> Optional[Tuple[object, ...]]:
         seg_hash = str(segment_id or "").strip()
         if not seg_hash:
+            return None
+        source_text_norm = str(source_text or "")
+        return (
+            self.project_id,
+            self.run_step,
+            str(chapter_path or ""),
+            seg_hash,
+            seg_hash,
+            self._hash_source_text(source_text_norm),
+            len(source_text_norm),
+            now,
+            now,
+        )
+
+    def ensure_pending(self, chapter_path: str, segment_id: str, source_text: str) -> None:
+        now = int(time.time())
+        row = self._pending_row_tuple(chapter_path, segment_id, source_text, now)
+        if row is None:
             return
         self.conn.execute(
             """
@@ -1384,19 +1426,68 @@ class SegmentLedger:
               source_len = excluded.source_len,
               updated_at = excluded.updated_at
             """,
-            (
-                self.project_id,
-                self.run_step,
-                str(chapter_path or ""),
-                seg_hash,
-                seg_hash,
-                self._hash_source_text(source_text),
-                len(source_text or ""),
-                now,
-                now,
-            ),
+            row,
         )
         self.conn.commit()
+
+    def ensure_pending_many(self, rows: Iterable[Tuple[str, str, str]]) -> int:
+        now = int(time.time())
+        payload: List[Tuple[object, ...]] = []
+        for chapter_path, segment_id, source_text in rows:
+            row = self._pending_row_tuple(chapter_path, segment_id, source_text, now)
+            if row is not None:
+                payload.append(row)
+        if not payload:
+            return 0
+        self.conn.executemany(
+            """
+            INSERT INTO segment_ledger(
+              project_id, run_step, chapter_path, segment_id, segment_hash,
+              source_hash, source_len, status, created_at, updated_at
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
+            ON CONFLICT(project_id, run_step, segment_hash) DO UPDATE SET
+              chapter_path = excluded.chapter_path,
+              segment_id = excluded.segment_id,
+              source_hash = excluded.source_hash,
+              source_len = excluded.source_len,
+              updated_at = excluded.updated_at
+            """,
+            payload,
+        )
+        self.conn.commit()
+        return len(payload)
+
+    def prune_scope_to_segment_ids(self, active_segment_ids: Set[str]) -> int:
+        cleaned = sorted({str(x or "").strip() for x in active_segment_ids if str(x or "").strip()})
+        cur = self.conn.cursor()
+        cur.execute("CREATE TEMP TABLE IF NOT EXISTS _ledger_active(segment_hash TEXT PRIMARY KEY)")
+        cur.execute("DELETE FROM _ledger_active")
+        if cleaned:
+            cur.executemany(
+                "INSERT OR IGNORE INTO _ledger_active(segment_hash) VALUES (?)",
+                [(sid,) for sid in cleaned],
+            )
+            delete_cur = cur.execute(
+                """
+                DELETE FROM segment_ledger
+                WHERE project_id = ?
+                  AND run_step = ?
+                  AND segment_hash NOT IN (SELECT segment_hash FROM _ledger_active)
+                """,
+                (self.project_id, self.run_step),
+            )
+        else:
+            delete_cur = cur.execute(
+                """
+                DELETE FROM segment_ledger
+                WHERE project_id = ?
+                  AND run_step = ?
+                """,
+                (self.project_id, self.run_step),
+            )
+        self.conn.commit()
+        return int(delete_cur.rowcount or 0)
 
     def mark_processing(
         self,
@@ -1551,6 +1642,85 @@ def load_checkpoint_json(checkpoint_path: Path) -> Optional[Dict[str, object]]:
     if not isinstance(data, dict):
         return None
     return data
+
+
+def iter_epub_segment_payload(
+    input_epub: Path,
+    block_tags: Tuple[str, ...],
+) -> Iterable[Tuple[str, str, str]]:
+    with zipfile.ZipFile(input_epub, "r") as zin:
+        opf_path = find_opf_path(zin)
+        manifest, spine = parse_spine_and_manifest(zin, opf_path)
+        xpath = _xpath_translatable(block_tags)
+        for item_id in spine:
+            href, media_type = manifest.get(item_id, ("", ""))
+            if not href:
+                continue
+            if "xhtml" not in media_type and "html" not in media_type:
+                continue
+            chapter_path = normalize_epub_path(opf_path, href)
+            try:
+                raw = zin.read(chapter_path)
+            except KeyError:
+                continue
+            parser = etree.XMLParser(recover=True, resolve_entities=False, huge_tree=True)
+            try:
+                root = etree.fromstring(raw, parser=parser)
+            except Exception:
+                continue
+            for i, el in enumerate(root.xpath(xpath)):
+                if not has_translatable_text(el):
+                    continue
+                seg_inner = inner_xml(el).strip()
+                if not seg_inner:
+                    continue
+                seg_plain = etree.tostring(el, encoding="unicode", method="text")
+                sid = stable_id(chapter_path, i, seg_inner)
+                yield chapter_path, sid, seg_plain
+
+
+def seed_segment_ledger_from_epub(
+    input_epub: Path,
+    block_tags: Tuple[str, ...],
+    segment_ledger: SegmentLedger,
+    cache: Optional[Cache] = None,
+    *,
+    batch_size: int = 500,
+) -> LedgerSeedSummary:
+    existing = segment_ledger.load_scope_states()
+    active_segment_ids: Set[str] = set()
+    batch: List[Tuple[str, str, str]] = []
+    total = 0
+    completed = 0
+    cached = 0
+    upserted = 0
+
+    for chapter_path, sid, seg_plain in iter_epub_segment_payload(input_epub, block_tags):
+        total += 1
+        if cache is not None and cache.get(sid) is not None:
+            cached += 1
+        active_segment_ids.add(sid)
+        row = existing.get(sid)
+        if row is not None:
+            status = str(row["status"] or "").strip().upper()
+            done_inner = str(row["translated_inner"] or "").strip()
+            if status == "COMPLETED" and done_inner:
+                completed += 1
+        batch.append((chapter_path, sid, seg_plain))
+        if len(batch) >= max(1, int(batch_size)):
+            upserted += segment_ledger.ensure_pending_many(batch)
+            batch.clear()
+
+    if batch:
+        upserted += segment_ledger.ensure_pending_many(batch)
+    pruned = segment_ledger.prune_scope_to_segment_ids(active_segment_ids)
+    return LedgerSeedSummary(
+        total_segments=total,
+        completed_segments=completed,
+        cached_segments=cached,
+        upserted_segments=upserted,
+        pruned_segments=pruned,
+    )
 
 
 def compute_resume_extra_done(
@@ -1810,14 +1980,21 @@ def translate_epub(
         else:
             print("[CHECKPOINT-RESUME] checkpoint niepasujący do bieżących ścieżek - ignoruję.")
 
-    totals = compute_project_totals(working_input, cache, block_tags)
-    global_total = totals.total_segments
-    global_cached = totals.cached_segments
-    global_to_translate = totals.to_translate_segments
-    resume_extra_done = compute_resume_extra_done(working_input, cache, block_tags, completed_chapters)
-
-    # Liczniki postępu globalnego:
-    global_done = global_cached + resume_extra_done
+    ledger_seed: Optional[LedgerSeedSummary] = None
+    if segment_ledger is not None:
+        ledger_seed = seed_segment_ledger_from_epub(input_epub, block_tags, segment_ledger, cache=cache)
+        global_total = ledger_seed.total_segments
+        global_cached = ledger_seed.cached_segments
+        resume_extra_done = 0
+        global_to_translate = max(0, global_total - ledger_seed.completed_segments)
+        global_done = ledger_seed.completed_segments
+    else:
+        totals = compute_project_totals(working_input, cache, block_tags)
+        global_total = totals.total_segments
+        global_cached = totals.cached_segments
+        global_to_translate = totals.to_translate_segments
+        resume_extra_done = compute_resume_extra_done(working_input, cache, block_tags, completed_chapters)
+        global_done = global_cached + resume_extra_done
     global_new = 0
     global_ledger_reused = 0
 
@@ -1826,6 +2003,11 @@ def translate_epub(
     print(f"  Segmenty z cache:     {global_cached}")
     if resume_extra_done > 0:
         print(f"  Segmenty z resume:    {resume_extra_done}")
+    if ledger_seed is not None:
+        print(f"  Ledger completed:    {ledger_seed.completed_segments}")
+        print(f"  Ledger upserted:     {ledger_seed.upserted_segments}")
+        if ledger_seed.pruned_segments > 0:
+            print(f"  Ledger pruned:       {ledger_seed.pruned_segments}")
     print(f"  Segmenty do tłumacz.: {global_to_translate}")
     if global_total > 0:
         print(f"  Start progress:       {global_done}/{global_total} ({(global_done/global_total)*100:.1f}%)")
@@ -1890,24 +2072,29 @@ def translate_epub(
                 seg_plain = etree.tostring(el, encoding="unicode", method="text")
                 sid = stable_id(chapter_path, i, seg_inner)
                 ledger_done_inner: Optional[str] = None
+                ledger_status = ""
                 if segment_ledger is not None:
                     row = ledger_rows.get(sid)
                     if row is None:
                         segment_ledger.ensure_pending(chapter_path, sid, seg_plain)
-                    elif str(row["status"] or "").upper() == "COMPLETED":
-                        val = str(row["translated_inner"] or "").strip()
-                        if val:
-                            ledger_done_inner = val
+                    else:
+                        ledger_status = str(row["status"] or "").strip().upper()
+                        if ledger_status == "COMPLETED":
+                            val = str(row["translated_inner"] or "").strip()
+                            if val:
+                                ledger_done_inner = val
 
                 tr_cached = cache.get(sid)
                 if tr_cached is not None:
                     if polish_guard and not looks_like_polish(tr_cached):
-                        print(f"  [LANG-GUARD] Ignoruję cache (wygląda na EN): {sid}")
+                        print(f"  [LANG-GUARD] Ignoruje cache (wyglada na EN): {sid}")
                         segs.append(Segment(idx=i, el=el, seg_id=sid, inner=seg_inner, plain=seg_plain))
                         continue
                     replace_inner_xml(el, tr_cached)
                     chapter_cache += 1
                     if segment_ledger is not None:
+                        if ledger_status != "COMPLETED":
+                            global_done += 1
                         segment_ledger.mark_completed(chapter_path, sid, seg_plain, tr_cached, provider="cache", model=model)
                 elif ledger_done_inner is not None:
                     if polish_guard and not looks_like_polish(ledger_done_inner):
@@ -1917,7 +2104,6 @@ def translate_epub(
                     cache[sid] = ledger_done_inner
                     cache.append(sid, ledger_done_inner)
                     chapter_ledger += 1
-                    global_done += 1
                     global_ledger_reused += 1
                     if tm is not None:
                         tm.add(seg_plain, ledger_done_inner, score=1.0, source_lang=source_lang, target_lang=target_lang)
@@ -1945,11 +2131,10 @@ def translate_epub(
                                 segment_ledger.mark_completed(chapter_path, sid, seg_plain, tm_hit, provider="tm", model=model)
                     else:
                         segs.append(Segment(idx=i, el=el, seg_id=sid, inner=seg_inner, plain=seg_plain))
-
             chapter_new_total = len(segs)
 
             if chapter_cache > 0 or chapter_tm > 0 or chapter_ledger > 0:
-                # global_done nie zwiększamy tutaj, bo cache policzyliśmy w prepass jako global_cached.
+                # Progress already updated per segment; this line only refreshes log output.
                 _print_global_progress(
                     chapter_path,
                     extra=f"spine {spine_idx}/{spine_total} | cache: {chapter_cache} | tm: {chapter_tm} | ledger: {chapter_ledger}",

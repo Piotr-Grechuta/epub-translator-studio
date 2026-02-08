@@ -48,6 +48,7 @@ from runtime_core import (
     list_ollama_models as core_list_ollama_models,
 )
 from series_store import SeriesStore, detect_series_hint
+from text_preserve import set_text_preserving_inline
 from ui_style import apply_app_theme
 
 APP_TITLE = "EPUB Translator Studio"
@@ -67,7 +68,21 @@ CACHE_SEGMENTS_RE = re.compile(r"Segmenty\s+z\s+cache\s*:\s*(\d+)", re.IGNORECAS
 CHAPTER_CACHE_TM_RE = re.compile(r"\(cache:\s*(\d+)\s*,\s*tm:\s*(\d+)\)", re.IGNORECASE)
 METRICS_BLOB_RE = re.compile(r"metrics\[(.*?)\]", re.IGNORECASE)
 METRICS_KV_RE = re.compile(r"([a-zA-Z_]+)\s*=\s*([^;]+)")
+EPUBCHECK_SEVERITY_RE = re.compile(r"\b(FATAL|ERROR|WARNING)\b", re.IGNORECASE)
+INLINE_TOKEN_RE = re.compile(r"\[\[TAG\d{3}\]\]")
 LOG = logging.getLogger(__name__)
+
+
+def parse_epubcheck_findings(raw_output: str) -> Dict[str, int]:
+    counts = {"fatal": 0, "error": 0, "warning": 0}
+    for line in str(raw_output or "").splitlines():
+        m = EPUBCHECK_SEVERITY_RE.search(line)
+        if not m:
+            continue
+        sev = str(m.group(1) or "").strip().lower()
+        if sev in counts:
+            counts[sev] += 1
+    return counts
 
 
 def list_ollama_models(host: str, timeout_s: int = 20) -> List[str]:
@@ -2866,10 +2881,17 @@ class TranslatorGUI:
             return False, f"[EPUBCHECK-GATE] FAIL: epubcheck unavailable: {e}"
 
         raw = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
-        if proc.returncode == 0:
-            return True, "[EPUBCHECK-GATE] PASS"
+        sev = parse_epubcheck_findings(raw)
+        fatal_or_error = int(sev.get("fatal", 0) or 0) + int(sev.get("error", 0) or 0)
+        if proc.returncode == 0 and fatal_or_error == 0:
+            return True, f"[EPUBCHECK-GATE] PASS (warning={int(sev.get('warning', 0) or 0)})"
         tail = "\n".join(raw.splitlines()[-40:]).strip()
-        msg = f"[EPUBCHECK-GATE] FAIL: exit={proc.returncode}"
+        msg = (
+            f"[EPUBCHECK-GATE] FAIL: exit={proc.returncode} "
+            f"fatal={int(sev.get('fatal', 0) or 0)} "
+            f"error={int(sev.get('error', 0) or 0)} "
+            f"warning={int(sev.get('warning', 0) or 0)}"
+        )
         if tail:
             msg += "\n" + tail
         return False, msg
@@ -3089,6 +3111,21 @@ class TranslatorGUI:
                     if not gate_ok:
                         self.log_queue.put("\n=== EPUBCHECK GATE BLOCKED ===\n")
                         code = 86
+                if (
+                    code == 0
+                    and bool(self.hard_gate_epubcheck_var.get())
+                    and self.current_project_id is not None
+                    and runner_db is not None
+                ):
+                    qa_sev_ok, qa_sev_msg = runner_db.qa_severity_gate_status(
+                        self.current_project_id,
+                        run_step,
+                        severities=("fatal", "error"),
+                    )
+                    self.log_queue.put(f"[QA-SEVERITY-GATE] {qa_sev_msg}\n")
+                    if not qa_sev_ok:
+                        self.log_queue.put("\n=== QA SEVERITY GATE BLOCKED ===\n")
+                        code = 87
                 if code == 0:
                     self.log_queue.put("\n=== " + self.tr("log.run_ok", "RUN OK") + " ===\n")
                     self.root.after(0, lambda: self._set_status(self.tr("status.done", "Finished"), "ok"))
@@ -3466,6 +3503,8 @@ class TextEditorWindow:
         self.current_chapter_path: Optional[str] = None
         self.current_root: Optional[etree._Element] = None
         self.current_segments: List[etree._Element] = []
+        self.active_segment_idx: Optional[int] = None
+        self.active_token_map: Dict[str, str] = {}
         self._tooltips: List[Any] = []
 
         wrap = ttk.Frame(self.win, padding=12)
@@ -3496,6 +3535,9 @@ class TextEditorWindow:
 
         self.editor = ScrolledText(right, height=18, font=("Consolas", 10))
         self.editor.grid(row=2, column=0, sticky="nsew", pady=(8, 0))
+        self.editor.tag_configure("InlineToken", background="#f1e5c5", foreground="#5e3f00")
+        self.editor.bind("<KeyPress>", self._on_editor_keypress, add="+")
+        self.editor.bind("<<Paste>>", self._on_editor_paste, add="+")
         right.rowconfigure(2, weight=2)
 
         btn = ttk.Frame(right)
@@ -3503,6 +3545,12 @@ class TextEditorWindow:
         ttk.Button(btn, text=self.gui.tr("editor.save_segment", "Save segment"), command=self._save_segment).pack(side="left")
         ttk.Button(btn, text=self.gui.tr("editor.save_epub", "Save EPUB"), command=self._save_epub).pack(side="left", padx=(8, 0))
         self._install_tooltips()
+
+    def _msg_info(self, message: str, title: Optional[str] = None) -> None:
+        self.gui._msg_info(message, title=title)
+
+    def _msg_error(self, message: str, title: Optional[str] = None) -> None:
+        self.gui._msg_error(message, title=title)
 
     def _install_tooltips(self) -> None:
         text_tip = {
@@ -3534,6 +3582,133 @@ class TextEditorWindow:
 
         self._tooltips = install_tooltips(self.win, resolver)
 
+    def _tokenize_inline_segment(self, el: etree._Element) -> Tuple[str, Dict[str, str]]:
+        token_map: Dict[str, str] = {}
+        parts: List[str] = []
+        if el.text:
+            parts.append(str(el.text))
+        token_no = 1
+        for child in list(el):
+            token = f"[[TAG{token_no:03d}]]"
+            token_no += 1
+            token_map[token] = etree.tostring(child, encoding="unicode", method="xml", with_tail=False)
+            parts.append(token)
+            if child.tail:
+                parts.append(str(child.tail))
+        return "".join(parts), token_map
+
+    def _render_editor_text(self, text: str) -> None:
+        self.editor.delete("1.0", "end")
+        self.editor.mark_set("insert", "1.0")
+        cursor = 0
+        for m in INLINE_TOKEN_RE.finditer(text):
+            if m.start() > cursor:
+                self.editor.insert("insert", text[cursor:m.start()])
+            token = m.group(0)
+            start = self.editor.index("insert")
+            self.editor.insert("insert", token)
+            end = self.editor.index("insert")
+            self.editor.tag_add("InlineToken", start, end)
+            cursor = m.end()
+        if cursor < len(text):
+            self.editor.insert("insert", text[cursor:])
+        self.editor.mark_set("insert", "1.0")
+
+    def _selection_overlaps_token(self) -> bool:
+        try:
+            sel_start = self.editor.index("sel.first")
+            sel_end = self.editor.index("sel.last")
+        except tk.TclError:
+            return False
+        ranges = self.editor.tag_ranges("InlineToken")
+        for i in range(0, len(ranges), 2):
+            r_start = str(ranges[i])
+            r_end = str(ranges[i + 1])
+            if self.editor.compare(sel_start, "<", r_end) and self.editor.compare(sel_end, ">", r_start):
+                return True
+        return False
+
+    def _cursor_touches_token(self, *, backspace: bool = False) -> bool:
+        idx = "insert-1c" if backspace else "insert"
+        try:
+            return "InlineToken" in self.editor.tag_names(idx)
+        except tk.TclError:
+            return False
+
+    def _on_editor_keypress(self, event: tk.Event[Any]) -> Optional[str]:
+        keysym = str(getattr(event, "keysym", "") or "")
+        char = str(getattr(event, "char", "") or "")
+        state = int(getattr(event, "state", 0) or 0)
+        ctrl = bool(state & 0x4)
+
+        if keysym in {"Left", "Right", "Up", "Down", "Home", "End", "Prior", "Next", "Tab"}:
+            return None
+        if ctrl and keysym.lower() in {"a", "c", "z", "y"}:
+            return None
+        if self._selection_overlaps_token():
+            self.win.bell()
+            return "break"
+        if keysym == "BackSpace" and self._cursor_touches_token(backspace=True):
+            self.win.bell()
+            return "break"
+        if keysym == "Delete" and self._cursor_touches_token(backspace=False):
+            self.win.bell()
+            return "break"
+        if char and self._cursor_touches_token(backspace=False):
+            self.win.bell()
+            return "break"
+        return None
+
+    def _on_editor_paste(self, _event: tk.Event[Any]) -> Optional[str]:
+        if self._selection_overlaps_token() or self._cursor_touches_token(backspace=False):
+            self.win.bell()
+            return "break"
+        return None
+
+    def _assert_tokens_intact(self, text: str, token_map: Dict[str, str]) -> Tuple[bool, str]:
+        _ = text
+        expected = list(token_map.keys())
+        ranges = self.editor.tag_ranges("InlineToken")
+        found: List[str] = []
+        for i in range(0, len(ranges), 2):
+            start = str(ranges[i])
+            end = str(ranges[i + 1])
+            found.append(self.editor.get(start, end))
+        if found == expected:
+            return True, ""
+        return False, self.gui.tr(
+            "err.editor_inline_tokens_modified",
+            "Inline tags were modified. Keep token markers unchanged (e.g. [[TAG001]]).",
+        )
+
+    def _apply_tokenized_segment_text(self, el: etree._Element, text: str, token_map: Dict[str, str]) -> None:
+        for c in list(el):
+            el.remove(c)
+        el.text = None
+        pos = 0
+        prev_child: Optional[etree._Element] = None
+        for m in INLINE_TOKEN_RE.finditer(text):
+            plain = text[pos:m.start()]
+            if plain:
+                if prev_child is None:
+                    el.text = (el.text or "") + plain
+                else:
+                    prev_child.tail = (prev_child.tail or "") + plain
+            token = m.group(0)
+            child_raw = token_map.get(token)
+            if child_raw is None:
+                raise ValueError(f"Missing token payload: {token}")
+            child = etree.fromstring(child_raw.encode("utf-8"))
+            el.append(child)
+            prev_child = child
+            pos = m.end()
+        tail = text[pos:]
+        if tail:
+            if prev_child is None:
+                el.text = (el.text or "") + tail
+            else:
+                prev_child.tail = (prev_child.tail or "") + tail
+
     def _on_chapter_selected(self) -> None:
         sel = self.chapter_box.curselection()
         if not sel:
@@ -3548,12 +3723,15 @@ class TextEditorWindow:
         self.current_chapter_path = chapter_path
         self.current_root = root
         self.current_segments = segments
+        self.active_segment_idx = None
+        self.active_token_map = {}
         self.segment_box.delete(0, "end")
         for i, el in enumerate(segments):
-            txt = (el.text or "").strip().replace("\n", " ")
+            txt = etree.tostring(el, encoding="unicode", method="text").strip().replace("\n", " ")
             if len(txt) > 90:
                 txt = txt[:90] + "..."
             self.segment_box.insert("end", f"{i:04d}: <{etree.QName(el).localname}> {txt}")
+        self.editor.delete("1.0", "end")
 
     def _on_segment_selected(self) -> None:
         sel = self.segment_box.curselection()
@@ -3563,9 +3741,10 @@ class TextEditorWindow:
         if idx < 0 or idx >= len(self.current_segments):
             return
         el = self.current_segments[idx]
-        txt = etree.tostring(el, encoding="unicode", method="text")
-        self.editor.delete("1.0", "end")
-        self.editor.insert("1.0", txt)
+        text, token_map = self._tokenize_inline_segment(el)
+        self.active_segment_idx = idx
+        self.active_token_map = token_map
+        self._render_editor_text(text)
 
     def _save_segment(self) -> None:
         sel = self.segment_box.curselection()
@@ -3574,17 +3753,29 @@ class TextEditorWindow:
         idx = int(sel[0])
         if idx < 0 or idx >= len(self.current_segments):
             return
-        new_text = self.editor.get("1.0", "end").strip()
+        new_text = self.editor.get("1.0", "end-1c")
         el = self.current_segments[idx]
-        for c in list(el):
-            el.remove(c)
-        el.text = new_text
-        preview = new_text.replace("\n", " ")
+        token_map: Dict[str, str] = self.active_token_map if self.active_segment_idx == idx else {}
+        if token_map:
+            ok, msg = self._assert_tokens_intact(new_text, token_map)
+            if not ok:
+                self._msg_error(msg)
+                return
+            try:
+                self._apply_tokenized_segment_text(el, new_text, token_map)
+            except Exception as e:
+                self._msg_error(f"{self.gui.tr('err.editor_save_segment', 'Failed to save segment:')}\n{e}")
+                return
+        else:
+            set_text_preserving_inline(el, new_text)
+        preview = etree.tostring(el, encoding="unicode", method="text").strip().replace("\n", " ")
         if len(preview) > 90:
             preview = preview[:90] + "..."
         self.segment_box.delete(idx)
         self.segment_box.insert(idx, f"{idx:04d}: <{etree.QName(el).localname}> {preview}")
+        self.segment_box.selection_clear(0, "end")
         self.segment_box.selection_set(idx)
+        self._on_segment_selected()
 
     def _save_epub(self) -> None:
         if self.current_root is None or not self.current_chapter_path:
