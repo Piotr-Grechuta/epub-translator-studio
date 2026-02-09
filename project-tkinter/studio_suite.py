@@ -6,6 +6,7 @@ import json
 import re
 import sqlite3
 import subprocess
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -102,6 +103,7 @@ class StudioSuiteWindow:
         self._build_check_tab(nb)
         self._build_ill_tab(nb)
         self._build_pipeline_tab(nb)
+        self._build_db_update_tab(nb)
         self._build_dashboard_tab(nb)
         self._build_plugins_tab(nb)
         self._install_tooltips()
@@ -814,6 +816,165 @@ class StudioSuiteWindow:
             return
         self.gui.db.mark_project_pending(self.gui.current_project_id, "translate")
         self.gui._refresh_projects(select_current=True)
+
+    def _build_db_update_tab(self, nb: ttk.Notebook) -> None:
+        tab = ttk.Frame(nb, padding=8)
+        nb.add(tab, text="DB Update")
+
+        self.dbu_status_var = tk.StringVar(value="Status: idle")
+        top = ttk.Frame(tab)
+        top.pack(fill="x")
+        ttk.Button(top, text="Refresh status", command=self._dbu_refresh_status).pack(side="left")
+        ttk.Button(top, text="Run migrate", command=self._dbu_run_migrate).pack(side="left", padx=(8, 0))
+        ttk.Button(top, text="Rollback last", command=self._dbu_rollback_last).pack(side="left", padx=(8, 0))
+        ttk.Button(top, text="Export report", command=self._dbu_export_report).pack(side="left", padx=(8, 0))
+
+        ttk.Label(tab, textvariable=self.dbu_status_var, style="Sub.TLabel").pack(anchor="w", pady=(8, 4))
+        self.dbu_runs = tk.Listbox(tab, height=10)
+        self.dbu_runs.pack(fill="both", expand=False)
+
+        self.dbu_log = ScrolledText(tab, height=12, font=("Consolas", 9))
+        self.dbu_log.pack(fill="both", expand=True, pady=(8, 0))
+
+        self._dbu_refresh_status()
+
+    def _dbu_log(self, text: str) -> None:
+        self.dbu_log.insert("end", str(text))
+        self.dbu_log.see("end")
+
+    def _dbu_set_status(self, text: str) -> None:
+        self.dbu_status_var.set(str(text))
+
+    def _dbu_reload_main_db(self) -> None:
+        from project_db import ProjectDB
+
+        try:
+            self.gui.db.close()
+        except Exception:
+            pass
+        self.gui.db = ProjectDB(
+            self.db_path,
+            recover_runtime_state=True,
+            backup_paths=[self.gui.workdir / "data" / "series"],
+        )
+        self.gui._refresh_projects(select_current=True)
+        self.gui._refresh_profiles()
+        self.gui._refresh_series()
+        self.gui._refresh_run_history()
+        self.gui._refresh_ledger_status()
+
+    def _dbu_refresh_status(self) -> None:
+        from project_db import ProjectDB
+
+        db = ProjectDB(self.db_path, run_migrations=False)
+        try:
+            report = db.build_migration_report(limit=30)
+        finally:
+            db.close()
+
+        schema = int(report.get("schema_version", 0) or 0)
+        rows = report.get("rows", []) or []
+        self.dbu_runs.delete(0, "end")
+        for r in rows:
+            st = str(r.get("status", "")).strip()
+            frm = int(r.get("from_schema", 0) or 0)
+            to = int(r.get("to_schema", 0) or 0)
+            bid = int(r.get("id", 0) or 0)
+            bdir = str(r.get("backup_dir", "")).strip()
+            self.dbu_runs.insert("end", f"#{bid} {st} {frm}->{to} | {bdir}")
+        self._dbu_set_status(f"Status: schema={schema}, migrations={len(rows)}")
+
+    def _dbu_async(self, start_status: str, fn, done_ok_text: str) -> None:
+        self._dbu_set_status(start_status)
+        self._dbu_log(f"[DBU] {start_status}\n")
+
+        def worker() -> None:
+            try:
+                msg = fn()
+                self.win.after(0, lambda: self._dbu_log(f"[DBU] {msg}\n"))
+                self.win.after(0, lambda: self._dbu_set_status(done_ok_text))
+            except Exception as e:
+                self.win.after(0, lambda: self._dbu_log(f"[DBU] ERROR: {e}\n"))
+                self.win.after(0, lambda: self._dbu_set_status("Status: error"))
+            finally:
+                self.win.after(0, self._dbu_refresh_status)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _dbu_run_migrate(self) -> None:
+        from project_db import ProjectDB
+
+        if self.gui.proc is not None:
+            self._msg_error("Cannot migrate while translation process is running.")
+            return
+
+        def run() -> str:
+            db = ProjectDB(
+                self.db_path,
+                recover_runtime_state=True,
+                backup_paths=[self.gui.workdir / "data" / "series"],
+            )
+            try:
+                if db.last_migration_summary:
+                    m = db.last_migration_summary
+                    msg = (
+                        f"Migration completed: {m.get('from_schema')} -> {m.get('to_schema')} "
+                        f"(backup: {m.get('backup_dir')})"
+                    )
+                else:
+                    msg = "Migration skipped: schema already current."
+            finally:
+                db.close()
+            self.win.after(0, self._dbu_reload_main_db)
+            return msg
+
+        self._dbu_async("Status: migration in progress...", run, "Status: migration done")
+
+    def _dbu_rollback_last(self) -> None:
+        from project_db import ProjectDB
+
+        if self.gui.proc is not None:
+            self._msg_error("Cannot rollback while translation process is running.")
+            return
+        if not self._ask_yes_no(
+            "Rollback przywroci poprzednia strukture/dane z backupu ostatniej migracji. Kontynuowac?",
+            title="DB Update",
+        ):
+            return
+
+        def run() -> str:
+            db = ProjectDB(self.db_path, run_migrations=False)
+            try:
+                ok, msg = db.rollback_last_migration()
+            finally:
+                db.close()
+            if not ok:
+                raise RuntimeError(msg)
+            self.win.after(0, self._dbu_reload_main_db)
+            return msg
+
+        self._dbu_async("Status: rollback in progress...", run, "Status: rollback done")
+
+    def _dbu_export_report(self) -> None:
+        from project_db import ProjectDB
+
+        out = filedialog.asksaveasfilename(
+            title="Save migration report",
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json"), ("All files", "*.*")],
+            initialdir=str(self.gui.workdir),
+            initialfile=f"migration_report_{time.strftime('%Y%m%d_%H%M%S')}.json",
+        )
+        if not out:
+            return
+        db = ProjectDB(self.db_path, run_migrations=False)
+        try:
+            report = db.build_migration_report(limit=200)
+        finally:
+            db.close()
+        Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._dbu_log(f"[DBU] Report saved: {out}\n")
+        self._dbu_set_status("Status: report exported")
 
     def _build_dashboard_tab(self, nb: ttk.Notebook) -> None:
         tab = ttk.Frame(nb, padding=8); nb.add(tab, text=self.gui.tr("studio.tab.dashboard", "Dashboard"))
