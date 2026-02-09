@@ -1,774 +1,488 @@
-# EPUB Translator Studio (Tkinter) - Manual praktyczny dla poczatkujacego
+﻿# EPUB Translator Studio (Tkinter) - Pelny manual dla poczatkujacego
 
-Ten dokument tlumaczy program w stylu:
-- co dana opcja robi,
-- po co jej uzywac,
-- jak jej uzyc krok po kroku,
-- co zmienia w plikach i bazie danych.
+Ten dokument jest napisany dla osoby, ktora:
+- pierwszy raz uruchamia program,
+- nie zna jeszcze terminologii technicznej,
+- chce krok po kroku dojsc od pliku EPUB do gotowego wyniku,
+- nie chce zgadywac co oznacza kazde pole w aplikacji.
 
-Manual dotyczy aplikacji z folderu `project-tkinter`.
+Jesli chcesz po prostu uruchomic pierwsze tlumaczenie, przejdz od razu do sekcji `6. Pierwsze tlumaczenie krok po kroku`.
 
-## 1. Co to jest i jak dziala (prosto)
+## 1. Co robi ten program
 
-Program sluzy do pracy z EPUB:
-1. tlumaczenie (`translate`),
-2. redakcja po tlumaczeniu (`edit`),
-3. QA (kontrola jakosci),
-4. walidacja EPUB,
-5. operacje techniczne (okladka, grafiki, wizytowka, edycja segmentow).
+EPUB Translator Studio to aplikacja desktopowa do:
+1. tlumaczenia ksiazek EPUB przy pomocy AI,
+2. redakcji gotowego tlumaczenia,
+3. kontroli jakosci (QA),
+4. zarzadzania pamiecia tlumaczen (TM),
+5. pracy seryjnej na wielu projektach.
 
-Przeplyw pracy (najczesciej):
-1. wybierasz `input.epub`,
-2. uruchamiasz `translate`,
-3. sprawdzasz QA,
-4. uruchamiasz `edit` (jesli potrzebne),
-5. robisz walidacje EPUB.
+Program nie zmienia oryginalnego pliku EPUB automatycznie. Zawsze pracujesz na wskazanych plikach wyjsciowych.
 
-Interfejs ma 2 poziomy:
-- glowny panel (`app_gui_classic.py` uruchamiany przez `app_main.py`),
-- panel rozszerzony `Studio Tools (12)` (faktycznie 10 zakladek).
+## 2. Czego potrzebujesz przed startem
 
-## 2. Co program zapisuje i gdzie
+Minimalnie:
+1. System Windows/Linux/macOS.
+2. Python 3.11 lub nowszy.
+3. Plik EPUB do pracy.
+4. Jedna z dwoch drog AI:
+- lokalnie: Ollama + model,
+- online: Google API key (Gemini).
 
-Najwazniejsze elementy danych:
-- `translator_studio.db` - baza SQLite z projektami, historiami runow, QA, TM.
-- `data/series/<series-slug>/series.db` - lokalna baza serii (terminy, decyzje, lore/styl).
-- `data/series/<series-slug>/generated/approved_glossary.txt` - eksport zatwierdzonego slownika serii.
-- `data/series/<series-slug>/generated/merged_glossary_project_<id>.txt` - slownik uzyty w konkretnym runie (seria + projekt).
-- `events/app_events.jsonl` - dziennik zdarzen aplikacji.
-- pliki wynikowe EPUB - np. `book_pl.epub`, `book_pl_redakcja.epub`.
-- cache segmentow - np. `cache_book.jsonl`.
-- pliki debug - folder z pola `Debug dir`.
-- snapshoty - `snapshots/snapshot_YYYYMMDD_HHMMSS.zip`.
-- pluginy providerow - `providers/*.json`, `providers/*.py`, `providers/manifest.json`.
+## 3. Instalacja i uruchomienie
 
-Co jest bezpieczne:
-- samo klikniecie `Zapisz`, `Kolejkuj`, `Refresh` nie modyfikuje EPUB.
+Przejdz do katalogu projektu:
 
-Co modyfikuje EPUB:
-- `Start translacji` (zapis output),
-- `Dodaj wizytowke`, `Usun okladke`, `Usun grafiki`,
-- `Save EPUB` w edytorze segmentow,
-- `Search/Replace -> Apply`.
-
-## 3. Szybki start (pierwsze 10 minut)
-
-1. Wejdz do folderu:
 ```powershell
-cd C:\Users\Public\epub-translator-studio\project-tkinter
+cd project-tkinter
 ```
 
-2. Uruchom GUI:
+Uruchom aplikacje (wariant classic, gdy jestes w `project-tkinter`):
+
 ```powershell
 python app_main.py --variant classic
 ```
 
-3. W panelu:
-- kliknij `Nowy` i podaj nazwe projektu,
-- ustaw `Wejsciowy EPUB`,
-- sprawdz `Wyjsciowy EPUB` i `Prompt`,
-- wybierz provider + model (`Odswiez liste modeli`),
-- kliknij `Start translacji`.
+Wariant horizon (gdy jestes w `project-tkinter`):
 
-4. Po zakonczeniu:
-- kliknij `Waliduj EPUB`,
-- opcjonalnie otworz `Studio Tools -> QA` i zrob `Scan`.
-
-## 3A. Wymagania AI (konieczne)
-
-Do uruchamiania translacji potrzebujesz co najmniej jednego providera AI:
-
-1. Provider lokalny (`Ollama`)
-- zainstalowana usluga Ollama,
-- pobrany co najmniej jeden model, np.:
 ```powershell
+python app_main.py --variant horizon
+```
+
+Skroty startowe (gdy jestes w `project-tkinter`):
+
+```powershell
+python launcher_classic.py
+python launcher_horizon.py
+```
+
+Jesli uruchamiasz z katalogu glownego repo (`epub-translator-studio`), uzyj:
+
+```powershell
+python project-tkinter/app_main.py --variant classic
+python project-tkinter/app_main.py --variant horizon
+```
+
+## 4. Konfiguracja AI (konieczna)
+
+### 4.1 Opcja A: Ollama lokalnie
+
+Windows:
+
+```powershell
+winget install Ollama.Ollama
 ollama pull llama3.1:8b
 ```
-- w GUI poprawny `Ollama host` (domyslnie `http://127.0.0.1:11434`).
 
-2. Provider online (np. `Google Gemini`)
-- poprawny klucz API (`Google API key` / zmienna `GOOGLE_API_KEY`),
-- polaczenie z internetem.
+Po instalacji:
+1. W aplikacji ustaw `Provider = ollama`.
+2. Kliknij `Odswiez liste modeli`.
+3. Wybierz model z listy.
 
-Bez modelu w Ollama albo bez poprawnego API key run nie wystartuje.
+### 4.2 Opcja B: Google Gemini
 
-## 4. Kluczowe pojecia
+Ustaw klucz API (jedna z metod):
 
-### 4.1 Projekt
-Projekt to "teczka logiczna" w bazie:
-- pamieta sciezki plikow,
-- pamieta ustawienia dla `translate` i `edit`,
-- ma historie runow, QA findings i wpisy TM powiazane z projektem.
+Windows:
 
-### 4.2 Profil kroku
-Profil to zapis ustawien silnika AI (provider, timeout, batch, itd.).
-Mozesz miec osobny profil do szybkiego tlumaczenia i osobny do redakcji.
-
-### 4.3 Tryb (`translate` vs `edit`)
-Program trzyma osobno dla kazdego trybu:
-- output EPUB,
-- prompt,
-- cache,
-- nazwe profilu.
-
-To znaczy: przelaczenie trybu zmienia zestaw pol, ale nie kasuje danych drugiego trybu.
-
-### 4.4 QA Gate
-Po `translate` program moze automatycznie ustawic projekt do `edit`.
-Gate decyduje:
-- `PASS` -> wolno przejsc dalej,
-- `BLOCK` -> blokada przejscia (np. sa otwarte findings QA).
-
-### 4.5 TM (Translation Memory)
-TM to baza segmentow zrodlo->cel.
-Wplywa na powtarzalne fragmenty i spojnosc tlumaczenia.
-
-### 4.6 Seria i slownik serii
-Seria to warstwa nad pojedynczym projektem:
-- projekt mozna przypisac do serii recznie lub przez autodetekcje metadanych EPUB,
-- seria ma osobny slownik terminow (statusy: `proposed`, `approved`, `rejected`),
-- przy wlaczonym `Uzyj slownika` run korzysta ze scalonego slownika:
-1. zatwierdzone terminy serii,
-2. lokalny slownik projektu (jesli podany).
-
-Po udanym runie aplikacja moze dopisac propozycje terminow serii na podstawie TM projektu.
-
-## 5. Glowny panel: co, po co, jak, wplyw
-
-## 5.1 Sekcja "Projekt i profile"
-
-### `Nowy`
-- Po co: zalozenie nowego projektu.
-- Jak: klik `Nowy`, wpisz nazwe.
-- Wplyw: dodaje rekord w tabeli `projects` w `translator_studio.db`.
-
-### `Zapisz`
-- Po co: utrwalenie zmian w polach GUI do bazy.
-- Jak: po zmianie sciezek/modelu/jezykow kliknij `Zapisz`.
-- Wplyw: aktualizuje rekord `projects`; nie rusza plikow EPUB.
-
-### `Usun`
-- Po co: ukrycie projektu z listy aktywnych bez twardego kasowania.
-- Jak: klik `Usun` i potwierdz.
-- Wplyw: ustawia status projektu na `deleted`.
-
-### `Usun hard`
-- Po co: trwale usuniecie projektu.
-- Jak: klik `Usun hard` i potwierdz.
-- Wplyw:
-1. usuwa rekord projektu,
-2. usuwa TM przypisane do projektu,
-3. powiazane runy i QA sa usuwane kaskadowo.
-- Uwaga: tej operacji nie cofniesz przyciskiem `Cofnij ostatnia operacje`.
-
-### `Zapisz jako profil`
-- Po co: zapis aktualnej konfiguracji AI jako profil wielokrotnego uzycia.
-- Jak: ustaw parametry, klik `Zapisz jako profil`, podaj nazwe.
-- Wplyw: dodaje rekord w tabeli `profiles`.
-
-### `Eksport`
-- Po co: przeniesienie projektu do pliku JSON.
-- Jak: wybierz projekt, klik `Eksport`, zapisz plik.
-- Wplyw: tworzy JSON zawierajacy projekt + runy + TM + QA.
-
-### `Import`
-- Po co: odtworzenie projektu z JSON.
-- Jak: klik `Import`, wskaz JSON.
-- Wplyw:
-1. tworzy nowy projekt (nazwa z sufiksem, jesli kolizja),
-2. importuje runy, QA i TM do bazy.
-
-### `Seria` + `Tom`
-- Po co: utrzymanie spojnosci terminow i stylu miedzy ksiazkami tej samej serii.
-- Jak:
-1. wybierz serie z listy albo zostaw `brak serii`,
-2. opcjonalnie ustaw numer tomu (`Tom`).
-- Wplyw: zapisuje `series_id` i `volume_no` w tabeli `projects`.
-
-### `Nowa seria`
-- Po co: szybkie utworzenie serii bez wychodzenia z glownego panelu.
-- Jak: klik `Nowa seria`, wpisz nazwe.
-- Wplyw:
-1. tworzy rekord w tabeli `series` (`translator_studio.db`),
-2. inicjalizuje lokalny magazyn `data/series/<slug>/series.db`.
-
-### `Edytuj serie`
-- Po co: zmiana nazwy serii bez przepinania projektow.
-- Jak: wybierz serie z listy, klik `Edytuj serie`, wpisz nowa nazwe.
-- Wplyw:
-1. aktualizuje nazwe w tabeli `series`,
-2. zachowuje przypisania projektow do tej serii.
-
-### `Usun serie`
-- Po co: usuniecie serii, gdy nie chcesz juz jej utrzymywac.
-- Jak: wybierz serie z listy i klik `Usun serie`.
-- Wplyw:
-1. usuwa rekord serii z `translator_studio.db`,
-2. automatycznie odpina wszystkie projekty od tej serii (`series_id=NULL`, `volume_no=NULL`),
-3. opcjonalnie usuwa lokalne dane serii z `data/series/<slug>/`.
-
-### `Auto z EPUB`
-- Po co: automatyczne podpowiedzenie serii na podstawie metadanych EPUB (`OPF`).
-- Jak: po ustawieniu `Wejsciowy EPUB` kliknij `Auto z EPUB` i potwierdz przypisanie.
-- Wplyw: przypisuje serie do projektu i opcjonalnie ustawia `Tom`.
-
-### `Slownik serii`
-- Po co: zarzadzanie terminami serii i eksport zatwierdzonego glosariusza.
-- Jak:
-1. wybierz serie,
-2. klik `Slownik serii`,
-3. zatwierdzaj/odrzucaj terminy lub dodawaj recznie.
-- Wplyw:
-1. aktualizuje `data/series/<slug>/series.db`,
-2. moze wyeksportowac `approved_glossary.txt`.
-
-## 5.2 Sekcja "Pliki i tryb"
-
-### `Wejsciowy EPUB`
-- Po co: zrodlo tlumaczenia/redakcji.
-- Jak: wybierz plik `.epub`.
-- Wplyw: sluzy jako wejscie do procesu; program nie modyfikuje go bezposrednio przy starcie runu.
-
-### `Wyjsciowy EPUB`
-- Po co: plik, do ktorego zapisze sie wynik.
-- Jak: ustaw recznie lub przyjmij podpowiedz.
-- Wplyw: to ten plik bedzie nadpisany/utworzony przez proces tlumaczenia.
-
-### `Prompt`
-- Po co: instrukcje dla modelu.
-- Jak: wskaz plik `.txt`.
-- Wplyw: bez poprawnego promptu start runu zostanie zablokowany.
-
-### `Slownik`
-- Po co: dodatkowe terminy.
-- Jak: wskaz plik `.txt`.
-- Wplyw: dziala tylko gdy zaznaczone `Uzyj slownika`.
-
-### `Cache`
-- Po co: przyspieszenie i wznowienia.
-- Jak: wskaz plik `.jsonl`.
-- Wplyw: dziala tylko gdy zaznaczone `Uzyj cache`.
-
-### `Tryb` (`Tlumaczenie` / `Redakcja`)
-- Po co: wybor kroku pipeline.
-- Jak: przelacz radiobutton.
-- Wplyw:
-1. laduje osobny zestaw `output/prompt/cache/profile`,
-2. zmienia `active_step` projektu.
-
-### `Jezyk zrodlowy` i `Jezyk docelowy`
-- Po co: jawna para jezykowa dla modelu.
-- Wplyw: trafia do komendy runu i do danych projektu.
-
-## 5.3 Sekcja "Silnik i parametry batch"
-
-### `Provider`
-- `Ollama`: model lokalny.
-- `Google Gemini API`: model przez API.
-
-### `Ollama host`
-- Po co: adres lokalnej uslugi Ollama.
-- Wplyw: dodawany jako `--host` w komendzie.
-
-### `Google API key`
-- Po co: autoryzacja dla Google.
-- Wplyw: bez klucza run dla Google sie nie uruchomi.
-
-### `Prompt preset` + `Apply preset`
-- Po co: szybki wybor gotowej "receptury" promptu dla aktualnego `provider` i `trybu` (`translate`/`edit`).
-- Jak:
-1. wybierz preset z listy,
-2. kliknij `Apply preset`,
-3. aplikacja zapisze prompt do bezpiecznego pliku presetowego i podstawi go w polu `Prompt`.
-- Wplyw:
-1. nie trzeba recznie przepisywac promptu,
-2. wybor jest filtrowany do kompatybilnych presetow (np. Google/Gemini),
-3. aktywny preset zapisuje sie w stanie UI (SQLite).
-
-### `Max segs / request`, `Max chars / request`, `Pauza miedzy requestami`
-- Po co: kontrola wielkosci batchy i tempa zapytan.
-- Wplyw: bezposrednio zmienia argumenty procesu tlumacza.
-
-## 5.4 Sekcja "Model AI"
-
-### `Odswiez liste modeli`
-- Po co: pobranie aktualnych modeli od aktywnego providera.
-- Jak: ustaw provider, kliknij przycisk, wybierz model.
-- Wplyw: aktualizuje liste wyboru modelu (UI), nie zmienia EPUB.
-
-## 5.5 Sekcja "Ustawienia zaawansowane"
-
-Najwazniejsze pola i ich sens:
-- `Timeout`: ile sekund czekac na odpowiedz.
-- `Attempts` + `Backoff`: ile i jak ponawiac nieudane requesty.
-- `Temperature`: kreatywnosc modelu.
-- `Num ctx`, `Num predict`: limity kontekstu i generacji.
-- `Checkpoint`: co ile plikow zapisywac punkt kontrolny.
-- `Debug dir`: gdzie zapisywac materialy debug.
-- `Tagi`: jakie tagi HTML sa segmentowane do tlumaczenia.
-- `Uzyj cache`, `Uzyj slownika`: wlaczanie/wylaczanie obu mechanizmow.
-- `Tooltip mode`: tryb podpowiedzi interfejsu.
-- `Jezyk UI`: jezyk interfejsu.
-
-Praktyczna rada:
-- jesli nie wiesz co zmieniasz, zostaw domyslne.
-
-## 5.6 Sekcja "Uruchomienie"
-
-### `Start translacji`
-- Po co: uruchomienie procesu tlumaczenia/redakcji.
-- Jak:
-1. upewnij sie, ze pola wymagane sa ustawione,
-2. kliknij `Start translacji`.
-- Wplyw:
-1. zapisuje ustawienia i projekt do bazy,
-2. tworzy wpis `runs` ze statusem `running`,
-3. uruchamia proces tlumacza,
-4. po sukcesie ustawia status projektu (`idle` lub `pending`),
-5. po bledzie ustawia status `error`.
-
-Wazne:
-- po sukcesie `translate` program moze automatycznie ustawic krok `edit` jako `pending`,
-- ale tylko gdy QA Gate nie blokuje i pola `edit` sa uzupelnione.
-
-### `Stop`
-- Po co: zatrzymanie aktualnego procesu.
-- Wplyw: wysyla `terminate` do procesu i zatrzymuje run-all kolejki.
-
-### `Waliduj EPUB`
-- Po co: sprawdzenie poprawnosci EPUB po obrobce.
-- Wplyw:
-1. uruchamia tryb walidacji,
-2. zapisuje osobny run `validate` w bazie.
-
-### `Hard gate EPUBCheck`
-- Po co: zablokowanie finalizacji runu, jesli `epubcheck` zwroci bledy struktury EPUB.
-- Jak: w sekcji `Uruchomienie` zaznacz `Hard gate EPUBCheck`.
-- Wplyw:
-1. po udanym runie translacji/redakcji aplikacja automatycznie uruchamia `epubcheck`,
-2. przy bledzie gate run konczy sie statusem `error` (zamiast `ok`).
-
-### `Ledger status` (staly mini-dashboard)
-- Po co: stale widoczny postep segmentow ledgera podczas runu.
-- Jak: w sekcji `Uruchomienie`, pod glownym paskiem postepu, widoczny jest status i kolorowy pasek.
-- Wplyw:
-1. zielony = `COMPLETED`,
-2. zolty = `PROCESSING`,
-3. czerwony = `ERROR`,
-4. szary = `PENDING`.
-
-### `Estymacja`
-- Po co: szybka prognoza rozmiaru pracy.
-- Wplyw: oblicza liczbe segmentow, cache, token hint; nie modyfikuje plikow.
-
-### `Kolejkuj`
-- Po co: ustawienie projektu do pozniejszego uruchomienia.
-- Wplyw: status projektu -> `pending`, `active_step` = aktualny tryb.
-
-### `Uruchom nastepny`
-- Po co: uruchomienie najstarszego projektu `pending`.
-
-### `Run all pending`
-- Po co: uruchamianie calej kolejki po kolei.
-
-### `Stop run-all`
-- Po co: zakonczenie automatu po aktualnym zadaniu.
-
-### `Otworz output` / `Otworz cache`
-- Po co: szybkie otwarcie plikow w systemie.
-- Wplyw: tylko otwiera plik, nic nie zapisuje.
-
-### `Wyczysc debug`
-- Po co: usuniecie plikow z folderu debug.
-- Wplyw: kasuje zawartosc folderu `Debug dir`.
-
-## 5.7 Sekcja "Uladnianie EPUB"
-
-### `Dodaj wizytowke (1 EPUB)`
-- Po co: dodanie strony tytulowej z obrazem.
-- Jak:
-1. wybierz EPUB,
-2. wybierz obraz,
-3. podaj tytul,
-4. zaakceptuj podglad.
-- Wplyw:
-1. tworzy nowy plik `*_wizytowka.epub`,
-2. ustawia go jako aktualny `Wyjsciowy EPUB`,
-3. dodaje operacje do historii cofania.
-
-### `Dodaj wizytowke (folder)`
-- Po co: to samo, ale dla wielu EPUB naraz.
-- Wplyw: tworzy wiele `*_wizytowka.epub`.
-
-### `Usun okladke`
-- Po co: usuniecie zasobow cover.
-- Wplyw:
-1. tworzy nowy plik `*_bez_okladki.epub`,
-2. usuwa wpisy cover z manifestu/spine i obrazy.
-
-### `Usun grafiki (pattern)`
-- Po co: masowe usuwanie obrazow po regexie.
-- Jak: wpisz regex, np. `(?i)cover|banner|promo`.
-- Wplyw:
-1. tworzy nowy plik `*_bez_grafik.epub`,
-2. usuwa obrazy i referencje z rozdzialow, ktore pasuja do regex.
-
-### `Edytor tekstu EPUB`
-- Po co: reczna edycja segmentow tekstu.
-- Wplyw: po `Save EPUB` zapisuje zmiany i tworzy backup `.bak-edit-...`.
-
-### `Cofnij ostatnia operacje`
-- Po co: szybki rollback ostatniej operacji z historii.
-- Co potrafi:
-1. usunac ostatni wygenerowany plik EPUB,
-2. odtworzyc plik z backupu,
-3. usunac pliki z batcha.
-- Czego nie potrafi: nie cofnie np. `Usun hard` ani kasowania TM z `TM Manager`.
-
-### `Studio Tools (12)`
-- Po co: otwarcie panelu rozszerzonego.
-- Uwaga: etykieta mowi `12`, ale aktualnie sa 10 zakladek.
-
-## 5.8 Sekcja "Log"
-
-Zawiera:
-- historie ostatnich uruchomien projektu,
-- log live z procesu,
-- postep globalny i aktualna faze,
-- podglad statusu ledgera (`done/processing/error/pending`) bez otwierania Studio Tools.
-
-Po co laikowi:
-- to jest pierwsze miejsce do diagnozy, gdy cos "stoi" albo konczy sie bledem.
-
-## 6. Studio Tools: wszystkie zakladki praktycznie
-
-## 6.1 QA
-
-Po co:
-- wykrywanie i obsluga bledow QA per segment.
-
-Najwazniejsze przyciski:
-- `Scan`: skanuje EPUB i pokazuje findings.
-- `Save findings`: zapisuje findings do bazy (`qa_findings`) i resetuje review na `pending`.
-- `Load open`: laduje tylko `open`/`in_progress`.
-- `Mark resolved` / `Mark in_progress`: zmienia status znalezionych pozycji.
-- `Approve QA` / `Reject QA`: zapisuje decyzje w `qa_reviews`.
-- `Assign selected` / `Assign all open`: przypisuje assignee i due date.
-- `Escalate overdue`: oznacza przeterminowane jako `overdue`.
-- `Auto-assign rules`: automatyczne przypisanie wg JSON rules.
-- `Alert overdue`: wysyla webhook POST z lista overdue.
-
-Pole `Gate`:
-- `PASS` -> mozna przechodzic dalej,
-- `BLOCK` -> blokada (otwarte findings, brak review albo reject).
-
-Przyklad `Rules JSON` do auto-przypisania:
-```json
-{
-  "default": "reviewer",
-  "severity": { "error": "senior_qa", "warn": "qa" },
-  "rule_code": { "EN_LEAK": "linguist" },
-  "max_open_per_assignee": 100
-}
+```powershell
+setx GOOGLE_API_KEY "<TWOJ_KLUCZ>"
 ```
 
-Przyklad dla poczatkujacego:
-1. `Scan`
-2. `Save findings`
-3. `Load open`
-4. `Assign all open` (np. reviewer, 2 dni)
-5. po poprawkach `Mark resolved`
-6. `Approve QA`
-7. sprawdz czy `Gate: PASS`
+Linux/macOS:
 
-## 6.2 Side-by-side + Hotkeys
+```bash
+export GOOGLE_API_KEY="<TWOJ_KLUCZ>"
+```
 
-Po co:
-- porownanie Source (oryginal) i Target (tlumaczenie) segment po segmencie.
+Albo wpisz klucz bezposrednio w polu `Google API key` w aplikacji.
 
-Jak:
-1. ustaw Source EPUB i Target EPUB,
-2. klik `Load`,
-3. wybierz chapter i segment,
-4. edytuj prawa kolumne (Target),
-5. `Save Segment`,
-6. `Save EPUB`.
+Po konfiguracji:
+1. Ustaw `Provider = google`.
+2. Kliknij `Odswiez liste modeli`.
+3. Wybierz model.
 
-Skroty:
-- `Alt+Down`: nastepny segment,
-- `Alt+Up`: poprzedni segment,
-- `Ctrl+S`: zapis segmentu.
+## 5. Jak myslec o pracy w programie
 
-Wplyw:
-- `Save Segment` zmienia tylko dane w pamieci okna,
-- dopiero `Save EPUB` zapisuje plik i robi backup.
-- zapis segmentu zachowuje inline tagi i atrybuty (nie splaszcza struktury XHTML).
+Najwazniejsze pojecia:
 
-## 6.3 Search/Replace
+1. `Projekt`
+- jeden tytul, zestaw plikow i ustawien,
+- ma historie uruchomien, QA i dane TM.
 
-Po co:
-- masowe podmiany tekstu w EPUB.
+2. `Tryb`
+- `translate`: tlumaczenie,
+- `edit`: redakcja gotowego tlumaczenia.
 
-Jak bezpiecznie:
-1. wpisz `Find` i `Replace`,
-2. kliknij `Preview`,
-3. sprawdz liste trafien,
-4. kliknij `Apply` i potwierdz.
+3. `Profil`
+- zapisane ustawienia dla kroku `translate` albo `edit`.
 
-Wplyw:
-- zapisuje zmiany do rozdzialow EPUB,
-- tworzy backup (ostatni zapisany backup mozna cofnac przez `Cofnij`).
+4. `TM (Translation Memory)`
+- lokalna baza par zrodlo -> tlumaczenie,
+- obniza koszty i przyspiesza kolejne runy.
+
+5. `Ledger`
+- stan segmentow: `PENDING`, `PROCESSING`, `COMPLETED`, `ERROR`,
+- pozwala wznowic prace po przerwaniu.
+
+6. `QA gate`
+- blokady jakosci przed uznaniem runu za zakonczony.
+
+## 6. Pierwsze tlumaczenie krok po kroku
+
+To jest najwazniejsza sekcja dla nowego uzytkownika.
+
+### Krok 1: utworz projekt
+
+1. Otworz aplikacje.
+2. W sekcji `Projekt i profile` kliknij `Nowy`.
+3. Podaj nazwe projektu, np. `Moja pierwsza ksiazka`.
+4. Kliknij `Zapisz`.
+
+### Krok 2: ustaw pliki
+
+W sekcji `Pliki i tryb`:
+1. `Wejsciowy EPUB`: wskaz oryginalna ksiazke.
+2. `Wyjsciowy EPUB`: wskaz nowy plik, np. `book_pl.epub`.
+3. `Prompt`: wybierz plik promptu (domyslnie moze byc `prompt.txt`).
+4. `Tryb`: ustaw `translate`.
+5. `Jezyk zrodlowy`: np. `en`.
+6. `Jezyk docelowy`: np. `pl`.
+
+### Krok 3: ustaw silnik
+
+W sekcji `Silnik i parametry batch`:
+1. `Provider`: `ollama` albo `google`.
+2. Dla Google wpisz `Google API key` (jesli nie masz w env).
+3. Kliknij `Odswiez liste modeli`.
+4. Wybierz model.
+
+### Krok 4: uruchom
+
+W sekcji `Uruchomienie`:
+1. Kliknij `Start translacji`.
+2. Obserwuj log i pasek `Ledger status`.
+3. Czekaj do komunikatu `RUN OK`.
+
+### Krok 5: sprawdz wynik
+
+1. Kliknij `Otworz output`.
+2. Otworz plik EPUB w czytniku i sprawdz kilka rozdzialow.
+3. Jesli chcesz dodatkowo walidacje techniczna, kliknij `Waliduj EPUB`.
+
+To wszystko. Masz pierwszy kompletny przebieg.
+
+## 7. Dokladny opis sekcji glownego okna
+
+## 7.1 Projekt i profile
+
+1. `Nowy`
+- tworzy nowy projekt.
+
+2. `Zapisz`
+- zapisuje aktualne ustawienia projektu.
+
+3. `Usun`
+- usuwa projekt z listy (status logiczny), historia pozostaje.
+
+4. `Usun hard`
+- usuwa projekt trwale razem z danymi powiazanymi (TM projektu, historia).
+- uzywaj ostroznie.
+
+5. `Zapisz jako profil`
+- zapisuje aktualna konfiguracje jako profil wielokrotnego uzycia.
+
+6. `Eksport` / `Import`
+- eksport/import konfiguracji i danych projektu.
+
+7. `Seria` i `Tom`
+- przypisanie projektu do serii wydawniczej.
+
+## 7.2 Pliki i tryb
+
+1. `Wejsciowy EPUB`
+- plik zrodlowy.
+
+2. `Wyjsciowy EPUB`
+- plik docelowy dla aktualnego kroku.
+
+3. `Prompt`
+- instrukcja dla modelu AI.
+
+4. `Slownik`
+- opcjonalny glosariusz terminow.
+
+5. `Cache`
+- plik JSONL z pamiecia segmentow.
+
+6. `Tryb`
+- `translate` albo `edit`.
+
+7. `Jezyk zrodlowy` i `Jezyk docelowy`
+- para jezykowa wymuszana w runie.
+
+## 7.3 Silnik i model
+
+1. `Provider`
+- `ollama` lokalnie,
+- `google` online.
+
+2. `Ollama host`
+- adres uslugi ollama (domyslnie lokalny).
+
+3. `Google API key`
+- klucz dla Gemini.
+
+4. `Prompt preset` + `Apply preset`
+- gotowe style promptow, np. pod ksiazki lub redakcje.
+
+5. `Odswiez liste modeli`
+- pobiera modele dostepne dla wybranego providera.
+
+## 7.4 Ustawienia zaawansowane
+
+Najwazniejsze pola:
+1. `Max segs / request`
+- ile segmentow idzie na jedno zapytanie.
+
+2. `Max chars / request`
+- limit znakow na batch.
+
+3. `Pauza miedzy requestami`
+- opoznienie miedzy zapytaniami.
+
+4. `Timeout`, `Attempts`, `Backoff`
+- mechanizmy ponawiania przy bledach.
+
+5. `Smart context window`
+- liczba segmentow kontekstu przed i po aktualnym segmencie.
+- przyklad: `5` oznacza `5 poprzednich + 5 nastepnych`.
+
+6. `Context max chars (neighbor)` i `Context max chars (segment)`
+- limity rozmiaru kontekstu (kontrola kosztu tokenow).
+- im wyzsze, tym lepsza spojnosc, ale wiekszy koszt.
+
+7. `Checkpoint co N plikow`
+- zapis stanu wznowienia po rozdzialach.
+
+8. `Hard gate EPUBCheck`
+- blokuje finalizacje runu przy bledach struktury EPUB.
+
+## 7.5 Uruchomienie
+
+1. `Start translacji`
+- uruchamia run dla aktywnego kroku.
+
+2. `Stop`
+- wysyla przerwanie procesu.
+
+3. `Waliduj EPUB`
+- uruchamia walidacje bez translacji.
+
+4. `Ledger status`
+- licznik segmentow `done/processing/error/pending`.
+
+5. `Kolejkuj`, `Uruchom nastepny`, `Run all pending`
+- sterowanie kolejka projektow.
+
+6. `Otworz output`, `Otworz cache`, `Wyczysc debug`
+- szybkie akcje operacyjne.
+
+## 7.6 Uladnianie EPUB
+
+1. `Dodaj wizytowke` (pojedynczo i folder)
+- dokleja strone/karte poczatkowa.
+
+2. `Usun okladke`
+- usuwa elementy cover z EPUB.
+
+3. `Usun grafiki (pattern)`
+- usuwa grafiki pasujace do wzorca.
+
+4. `Edytor tekstu EPUB`
+- edycja segmentow z zachowaniem inline tagow.
+
+5. `Cofnij ostatnia operacje`
+- rollback ostatniej akcji narzedziowej.
+
+## 8. Studio Tools - pelny przewodnik
+
+Studio Tools to panel zaawansowany, ale nadal mozliwy do uzycia przez laika, jesli trzymasz sie kolejnosci.
+
+## 8.1 Zakladka QA
+
+Do czego sluzy:
+- wykrywa problemy jakosci,
+- zapisuje findings,
+- pilnuje gate przed przejsciem dalej.
+
+Praktyczny przebieg:
+1. Wybierz EPUB.
+2. Kliknij `Scan`.
+3. Kliknij `Save findings`.
+4. Przejrzyj liste i napraw problemy.
+5. Oznacz poprawione jako `resolved`.
+6. Dopiero potem `Approve QA`.
+
+## 8.2 Side-by-side + Hotkeys
+
+Do czego sluzy:
+- reczna korekta segment po segmencie,
+- porownanie zrodla i celu obok siebie.
+
+Zasada:
+- nie usuwaj znacznikow technicznych,
+- zapisuj segment, potem zapis EPUB.
+
+## 8.3 Search/Replace
+
+Do czego sluzy:
+- masowa zamiana tekstu.
+
+Bezpieczny sposob:
+1. Najpierw `Preview`.
+2. Sprawdz trafienia.
+3. Potem `Apply`.
+4. Otworz wynik i szybko sprawdz 2-3 rozdzialy.
+
+## 8.4 TM Manager
+
+Do czego sluzy:
+- przeglad i czyszczenie wpisow TM.
 
 Uwaga:
-- `Apply` dziala na trafienia z ostatniego `Preview`.
+- `Delete selected` jest operacja nieodwracalna.
 
-## 6.4 TM Manager
+## 8.5 Snapshots
 
-Po co:
-- przeglad i czyszczenie pamieci tlumaczen.
+Do czego sluzy:
+- kopia stanu roboczego i przywrocenie.
 
-Jak:
-1. wpisz fraze,
-2. `Search`,
-3. zaznacz rekordy,
-4. `Delete selected`.
+Praktyka:
+1. Przed duza zmiana: `Create`.
+2. Jesli cos poszlo zle: `Restore`.
 
-Wplyw:
-- kasuje wpisy z `tm_segments` w bazie.
-- to jest operacja nieodwracalna z GUI.
+## 8.6 EPUBCheck
 
-## 6.5 Snapshots
+Do czego sluzy:
+- walidacja techniczna EPUB.
 
-Po co:
-- "punkt przywracania" przed ryzykownymi zmianami.
+Po nowej poprawce:
+- narzedzie ma timeout fail-fast, wiec nie powinno wisiec bez konca.
 
-`Create`:
-- tworzy ZIP z kluczowymi plikami:
-  - `app_main.py`
-  - `app_gui_classic.py`
-  - `app_gui_horizon.py`
-  - `launcher_classic.py`
-  - `launcher_horizon.py`
-  - `translation_engine.py`
-  - `project_db.py`
-  - `epub_enhancer.py`
-  - `studio_suite.py`
-  - `translator_studio.db`
+## 8.7 Pipeline
 
-`Restore`:
-- rozpakowuje wybrany ZIP do katalogu projektu (nadpisuje pliki).
+Do czego sluzy:
+- szybkie kolejkowanie procesu `translate -> edit`.
 
-## 6.6 EPUBCheck
+## 8.8 Dashboard
 
-Po co:
-- uruchamia zewnetrzne narzedzie `epubcheck`.
+Do czego sluzy:
+- podglad metryk runow, QA i TM,
+- podzial ledgera i estymacje tokenow.
 
-Jak:
-1. podaj EPUB,
-2. kliknij `Run epubcheck`,
-3. czytaj log.
+## 8.9 Provider Plugins
 
-Wplyw:
-- nie modyfikuje EPUB, tylko raportuje.
+Do czego sluzy:
+- testy i walidacja pluginow providerow.
 
-## 6.7 Illustration Rule
+Wazne:
+- pluginy sa ograniczone polityka bezpieczenstwa,
+- skrypt pluginu musi zgadzac sie z hash w `providers/manifest.json`.
 
-Stan:
-- funkcja MVP/placeholder.
-- obecnie wyswietla komunikat, zeby uzyc narzedzi z `Uladnianie EPUB`.
+## 9. Jak dzialaja gate'y jakosci
 
-## 6.8 Pipeline
+Masz trzy warstwy kontroli:
 
-Po co:
-- szybkie ustawienie biezacego projektu jako `pending` dla kroku `translate`.
+1. `EPUBCheck gate`
+- sprawdza strukture EPUB,
+- przy `fatal/error` blokuje finalizacje (gdy hard gate wlaczony).
 
-Wplyw:
-- status projektu -> `pending`,
-- potem uruchamiasz go z panelu glownego (`Run all pending` albo `Uruchom nastepny`).
+2. `QA severity gate`
+- blokuje sukces runu, jesli sa otwarte findings `fatal/error`.
+- ten gate jest teraz niezalezny od przelacznika EPUBCheck.
 
-## 6.9 Dashboard
+3. `QA review gate` (workflow)
+- steruje przejsciem do kolejnego kroku po review QA.
 
-Po co:
-- szybki wglad w stan systemu:
-  - liczba runow,
-  - ok vs error,
-  - done/total,
-  - rozmiar TM,
-  - QA open/overdue,
-  - obciazenie per assignee.
+## 10. Praca z seria i slownikiem serii
 
-Wplyw:
-- tylko odczyt danych.
+Cel:
+- utrzymac spojnosc nazewnictwa miedzy tomami.
 
-## 6.10 Provider Plugins
+Przebieg:
+1. Przypisz projekt do serii.
+2. Ustaw numer tomu.
+3. Po runie program moze zaproponowac terminy z TM.
+4. W `Slownik serii` zatwierdzaj terminy.
+5. Zatwierdzone terminy trafiaja do scalonego glosariusza kolejnych runow.
 
-Po co:
-- rozszerzenie providerow przez pluginy JSON + skrypty Python.
+## 11. Kolejka projektow i praca seryjna
 
-Bezpieczenstwo pluginow:
-- launcher tylko `python|python.exe|py|py.exe`,
-- drugi argument musi byc relatywny `.py` pod `providers/`,
-- blokowane sa sciezki absolutne i `..`,
-- skrypt musi pasowac do hash SHA-256 z `providers/manifest.json`.
+Scenariusz:
+1. Dla kazdego projektu ustaw dane i kliknij `Kolejkuj`.
+2. Kliknij `Run all pending`.
+3. Program wykonuje projekty po kolei.
+4. `Stop run-all` zatrzyma po biezacym zadaniu.
 
-Przyciski:
-- `Create template`: tworzy `providers/example_provider.json`.
-- `Rebuild manifest`: buduje `providers/manifest.json` z hashami wszystkich `providers/*.py`.
-- `Validate all`: waliduje specyfikacje i integralnosc.
-- `Health check selected`: odpala komende pluginu testowo.
+Po nowej poprawce reliability:
+- jesli aplikacja padnie w trakcie runu, przy nast. starcie statusy `running` sa automatycznie naprawiane do stanu odzyskiwalnego.
 
-Minimalny plugin JSON:
-```json
-{
-  "name": "MyProvider",
-  "command_template": "python providers/my_provider.py --health --model {model} --prompt-file {prompt_file}"
-}
-```
+## 12. Kopie, logi i bezpieczenstwo danych
 
-Typowy flow:
-1. `Create template`
-2. dodaj `providers/my_provider.py`
-3. `Rebuild manifest`
-4. `Validate all`
-5. `Health check selected`
+1. Uzywaj `Snapshots` przed masowymi zmianami.
+2. Trzymaj osobno kopie EPUB zrodlowych.
+3. Regularnie archiwizuj `translator_studio.db`.
+4. Nie publikuj publicznie plikow z kluczami API.
 
-## 7. Mapa wplywu: akcja -> co sie zmienia
+Po nowej poprawce security:
+- restore snapshotu blokuje niebezpieczne sciezki ZIP (ochrona przed path traversal).
 
-| Akcja | Co zmienia w plikach | Co zmienia w bazie |
-|---|---|---|
-| `Zapisz` | nic | `projects` update |
-| `Nowy` | nic | nowy rekord `projects` |
-| `Nowa seria` | tworzy `data/series/<slug>/series.db` | nowy rekord `series` |
-| `Edytuj serie` | aktualizuje metadane serii | update rekordu `series` |
-| `Usun serie` | opcjonalnie usuwa `data/series/<slug>/` | usuwa rekord `series`, odpina `projects.series_id` |
-| `Auto z EPUB` | nic | przypisuje `projects.series_id` i opcjonalnie `projects.volume_no` |
-| `Slownik serii` (approve/reject/add) | aktualizuje pliki pod `data/series/<slug>/` | zapis terminow/decydji w bazie serii (osobny SQLite) |
-| `Kolejkuj` | nic | status `projects` -> `pending` |
-| `Start translacji` | zapis output EPUB/cache (wg procesu) | nowy `runs`, status projektu |
-| `Waliduj EPUB` | nic (raport w logu) | nowy `runs` (step=`validate`) |
-| `Usun` | nic | `projects.status='deleted'` |
-| `Usun hard` | nic na dysku EPUB | usuwa `projects` + TM projektu + powiazane runy/QA |
-| `Dodaj wizytowke` | nowy `*_wizytowka.epub` | historia cofania w pamieci GUI |
-| `Usun okladke` | nowy `*_bez_okladki.epub` | historia cofania w pamieci GUI |
-| `Usun grafiki` | nowy `*_bez_grafik.epub` | historia cofania w pamieci GUI |
-| `Save EPUB` (edytor) | zapis EPUB + backup `.bak-edit-*` | historia cofania w pamieci GUI |
-| `Search/Replace -> Apply` | modyfikuje EPUB + backup | historia cofania w pamieci GUI |
-| `TM Delete selected` | nic | kasuje rekordy `tm_segments` |
-| `QA Save findings` | nic | podmienia `qa_findings`, review=`pending` |
-| `QA Approve/Reject` | nic | nowy rekord `qa_reviews` |
-| `Snapshot Create` | nowy zip w `snapshots/` | nic |
-| `Snapshot Restore` | nadpisuje pliki z archiwum | posrednio (bo podmienia tez DB plik) |
+## 13. Najczestsze problemy i rozwiazania
 
-## 8. Gotowe scenariusze (dla laika)
+1. `Brak modeli`
+- sprawdz provider,
+- sprawdz klucz API lub czy ollama dziala,
+- kliknij `Odswiez liste modeli`.
 
-## 8.1 Scenariusz A: pierwsze tlumaczenie 1 ksiazki
+2. `Process error`
+- sprawdz log,
+- zmniejsz `Max chars / request`,
+- zwieksz `Timeout` i `Attempts`.
 
-1. `Nowy` -> nazwa np. `book1`.
-2. `Wejsciowy EPUB` -> wybierz ksiazke.
-3. Sprawdz `Wyjsciowy EPUB` (np. `book1_pl.epub`).
-4. Provider + model.
-5. `Start translacji`.
-6. `Waliduj EPUB`.
-7. `Otworz output`.
+3. `Run zatrzymuje sie na gate`
+- popraw findings QA,
+- uruchom EPUBCheck,
+- dopiero potem ponow run.
 
-Efekt:
-- masz wynikowy EPUB i wpis historii runu.
+4. `Brak postepu po wznowieniu`
+- sprawdz czy wskazujesz ten sam projekt i te same sciezki plikow,
+- sprawdz `Cache` i status `Ledger`.
 
-## 8.2 Scenariusz B: tlumaczenie + QA gate
+## 14. Dobre praktyki dla laika
 
-1. Zrob `translate`.
-2. `Studio Tools -> QA` -> `Scan`.
-3. `Save findings`.
-4. Popraw bledy.
-5. `Mark resolved`.
-6. `Approve QA`.
-7. sprawdz `Gate: PASS`.
+1. Jeden nowy parametr na raz.
+2. Po kazdej duzej zmianie: test na jednym rozdziale.
+3. Przed operacja masowa: snapshot.
+4. Nie usuwaj recznie plikow DB i cache podczas aktywnego runu.
+5. Utrzymuj porzadek nazw plikow (`book_src.epub`, `book_pl.epub`, `book_pl_edit.epub`).
 
-Efekt:
-- projekt gotowy do bezpiecznego przejscia na kolejny etap.
+## 15. Minimalna checklista przed publikacja gotowego EPUB
 
-## 8.3 Scenariusz C: bezpieczna operacja masowa
+1. Run `translate` zakonczony bez bledow.
+2. QA findings `fatal/error` zamkniete.
+3. EPUBCheck bez bledow krytycznych.
+4. Szybki przeglad 3-5 losowych rozdzialow.
+5. Zapisana kopia finalna.
 
-1. `Studio Tools -> Snapshots -> Create`.
-2. `Studio Tools -> Search/Replace -> Preview`.
-3. `Apply`.
-4. Jesli efekt zly: `Snapshots -> Restore`.
+## 16. Gdzie szukac dalej
 
-Efekt:
-- masowa podmiana z planem awaryjnym.
+1. Dokumentacja portalowa: `docs/`
+2. README: szybki przeglad projektu
+3. Workflow Git: `project-tkinter/GIT_WORKFLOW_PL.md`
+4. Support: `SUPPORT_PL.md`
 
-## 9. Typowe problemy i szybkie naprawy
+---
 
-1. `Brak modeli` po refresh:
-- sprawdz `Ollama host` lub `Google API key`.
-
-2. `Process is already running`:
-- zatrzymaj poprzedni run (`Stop`) albo poczekaj do konca.
-
-3. `Brak pola: ...`:
-- uzupelnij brakujace pole (input/output/prompt/model).
-
-4. `No EPUB for validation`:
-- ustaw poprawny output albo input EPUB.
-
-5. `epubcheck unavailable`:
-- zainstaluj `epubcheck` i dodaj do PATH.
-
-6. `Studio Tools (12)` ale mniej zakladek:
-- normalne; aktualnie jest 10 zakladek.
-
-## 10. Dobre praktyki pracy
-
-1. Jeden projekt = jedna ksiazka.
-2. Przed operacjami masowymi najpierw `Snapshot`.
-3. `Usun hard` tylko gdy masz pewnosc.
-4. W QA zawsze zapisuj findings (`Save findings`) zanim oceniasz gate.
-5. W pluginach zawsze sekwencja: `Rebuild manifest` -> `Validate all`.
-6. Jesli nie jestes pewny parametru AI, zostaw domyslny.
-
-## 11. Przydatne komendy serwisowe
-
-Preflight:
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/preflight.ps1
-```
-
-Czyszczenie artefaktow (podglad):
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/cleanup_project.ps1
-```
-
-Czyszczenie artefaktow (wykonanie):
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/cleanup_project.ps1 -Apply
-```
-
-Benchmark TM:
-```powershell
-python scripts/benchmark_tm.py --rows 20000 --lookups 300
-```
-
-## 12. Praca na wielu komputerach (Git)
-
-W repo jest gotowa automatyzacja:
-- skrypt: `scripts/git_workflow.py`
-- instrukcja: `GIT_WORKFLOW_PL.md`
-
-Najkrotsza wersja:
-1. raz na komputer: `python scripts/git_workflow.py setup`
-2. start dnia: `python scripts/git_workflow.py start --branch main`
-3. publikacja: `python scripts/git_workflow.py publish --branch main -m "opis zmian"`
-
-## 13. Wsparcie projektu
-
-W aplikacji sa szybkie przyciski:
-1. `Wesprzyj projekt`
-2. `Repo online`
-
-Link sponsora:
-- `https://github.com/sponsors/Piotr-Grechuta`
-
-Po aktywacji konta sponsors:
-1. Uzupelnij tresci profilu wg `.github/SPONSORS_PROFILE_TEMPLATE_PL.md`.
-2. Uzyj gotowych postow i CTA z `.github/SPONSORS_OUTREACH_PACK_PL.md`.
-3. Raz w tygodniu opublikuj krotki update + link wsparcia.
+Jesli chcesz, nastepny krok moge zrobic od razu: przygotowac druga wersje tego manuala jako
+`MANUAL_PL_BEGINNER.md` z jeszcze bardziej szczegolowymi "zrzutami przebiegu" (co kliknac, co powinienes zobaczyc po kazdym kroku).

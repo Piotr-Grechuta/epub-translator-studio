@@ -14,8 +14,16 @@ if str(PROJECT_ROOT) not in sys.path:
 from runtime_core import RunOptions, build_run_command  # noqa: E402
 from app_gui_classic import parse_epubcheck_findings  # noqa: E402
 from project_db import ProjectDB  # noqa: E402
-from text_preserve import set_text_preserving_inline  # noqa: E402
-from translation_engine import SegmentLedger, seed_segment_ledger_from_epub  # noqa: E402
+from text_preserve import set_text_preserving_inline, tokenize_inline_markup, apply_tokenized_inline_markup  # noqa: E402
+from translation_engine import (  # noqa: E402
+    SegmentLedger,
+    seed_segment_ledger_from_epub,
+    validate_entity_integrity,
+    semantic_similarity_score,
+    load_language_guard_profiles,
+    looks_like_target_language,
+    build_context_hints,
+)
 
 
 def _make_epub(tmp_path: Path) -> Path:
@@ -111,6 +119,149 @@ def test_text_preserve_keeps_nested_inline_tags() -> None:
     assert as_text == "X Y Z"
 
 
+def test_tokenize_inline_markup_supports_nested_chips_roundtrip() -> None:
+    root = etree.fromstring(b"<p>A <i>very <b>deep</b></i> example.</p>")
+    text, token_map = tokenize_inline_markup(root)
+    assert "[[TAG001]]" in text
+    assert len(token_map) >= 4
+    updated = text.replace("very", "mega").replace("example", "sample")
+    apply_tokenized_inline_markup(root, updated, token_map)
+    out = etree.tostring(root, encoding="unicode", method="xml")
+    assert "<i>" in out and "</i>" in out
+    assert "<b>" in out and "</b>" in out
+    assert "mega" in out
+    assert "sample" in out
+
+
+def _make_entity_epub(tmp_path: Path, *, chapter_text: str, name: str) -> Path:
+    epub_path = tmp_path / name
+    opf = """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <manifest>
+    <item id="ch1" href="Text/ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>
+"""
+    xhtml = f"""<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <p>{chapter_text}</p>
+  </body>
+</html>
+"""
+    container = """<?xml version="1.0" encoding="utf-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+"""
+    with zipfile.ZipFile(epub_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("META-INF/container.xml", container)
+        zf.writestr("OPS/content.opf", opf)
+        zf.writestr("OPS/Text/ch1.xhtml", xhtml)
+    return epub_path
+
+
+def test_validate_entity_integrity_detects_entity_drop(tmp_path: Path) -> None:
+    inp = _make_entity_epub(tmp_path, chapter_text="A&shy;B&nbsp;C", name="in.epub")
+    out = _make_entity_epub(tmp_path, chapter_text="ABC", name="out.epub")
+    ok, report, msg = validate_entity_integrity(inp, out)
+    assert ok is False
+    assert report["delta_soft_hyphen"] < 0 or report["delta_nbsp"] < 0
+    assert "ENTITY-INTEGRITY" in msg
+
+
+def test_semantic_similarity_score_distinguishes_close_and_far_texts() -> None:
+    close = semantic_similarity_score("To jest bardzo krotkie zdanie.", "To jest krotkie zdanie.")
+    far = semantic_similarity_score("Kot siedzi na kanapie.", "Samolot startuje z lotniska.")
+    assert close > 0.55
+    assert far < 0.55
+
+
+def test_segment_ledger_semantic_findings_replace_previous_open_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "semantic_findings.db"
+    db = ProjectDB(db_path)
+    try:
+        pid = db.create_project("Semantic gate project")
+    finally:
+        db.close()
+
+    ledger = SegmentLedger(db_path, project_id=pid, run_step="translate")
+    try:
+        inserted = ledger.replace_semantic_diff_findings(
+            [
+                {
+                    "chapter_path": "OPS/Text/ch1.xhtml",
+                    "segment_index": 1,
+                    "segment_id": "sid-1",
+                    "severity": "warn",
+                    "message": "Semantic drift score=0.40",
+                },
+                {
+                    "chapter_path": "OPS/Text/ch1.xhtml",
+                    "segment_index": 2,
+                    "segment_id": "sid-2",
+                    "severity": "error",
+                    "message": "Semantic drift score=0.20",
+                },
+            ]
+        )
+        assert inserted == 2
+        inserted2 = ledger.replace_semantic_diff_findings(
+            [
+                {
+                    "chapter_path": "OPS/Text/ch2.xhtml",
+                    "segment_index": 4,
+                    "segment_id": "sid-3",
+                    "severity": "warn",
+                    "message": "Semantic drift score=0.50",
+                }
+            ]
+        )
+        assert inserted2 == 1
+    finally:
+        ledger.close()
+
+    db2 = ProjectDB(db_path)
+    try:
+        rows = db2.list_qa_findings(pid, step="translate", status=None)
+        sem_rows = [r for r in rows if str(r["rule_code"]) == "SEMANTIC_DIFF" and str(r["status"]) in {"open", "in_progress"}]
+        assert len(sem_rows) == 1
+        assert str(sem_rows[0]["segment_id"]) == "sid-3"
+    finally:
+        db2.close()
+
+
+def test_language_guard_profiles_support_custom_language(tmp_path: Path) -> None:
+    cfg = tmp_path / "guards.json"
+    cfg.write_text(
+        """
+{
+  "ro": {
+    "special_chars": "ăâîșț",
+    "hint_words": ["si", "este", "nu", "un", "o", "cu", "pentru", "care"]
+  }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    profiles = load_language_guard_profiles(cfg)
+    assert "ro" in profiles
+    assert looks_like_target_language("Acesta este un test si merge bine.", "ro", profiles=profiles) is True
+    assert (
+        looks_like_target_language(
+            "This is clearly english text with many words and no romanian markers at all.",
+            "ro",
+            profiles=profiles,
+        )
+        is False
+    )
+
+
 def test_build_run_command_includes_run_step() -> None:
     opts = RunOptions(
         provider="ollama",
@@ -133,12 +284,40 @@ def test_build_run_command_includes_run_step() -> None:
         source_lang="en",
         target_lang="pl",
         run_step="edit",
+        context_window="5",
+        context_neighbor_max_chars="200",
+        context_segment_max_chars="1500",
     )
     cmd = build_run_command(["python", "-u", "translation_engine.py"], opts)
     assert "--run-step" in cmd
     idx = cmd.index("--run-step")
     assert idx + 1 < len(cmd)
     assert cmd[idx + 1] == "edit"
+    assert "--context-window" in cmd
+    assert cmd[cmd.index("--context-window") + 1] == "5"
+    assert "--context-neighbor-max-chars" in cmd
+    assert "--context-segment-max-chars" in cmd
+
+
+def test_build_context_hints_uses_neighbor_window() -> None:
+    chapter_order = [
+        ("s1", "Alpha one."),
+        ("s2", "Beta two."),
+        ("s3", "Gamma three."),
+        ("s4", "Delta four."),
+    ]
+    hints = build_context_hints(
+        chapter_order,
+        {"s2", "s3"},
+        window=1,
+        neighbor_max_chars=80,
+        per_segment_max_chars=300,
+    )
+    assert "s2" in hints and "s3" in hints
+    assert "Alpha one." in hints["s2"]
+    assert "Gamma three." in hints["s2"]
+    assert "Beta two." in hints["s3"]
+    assert "Delta four." in hints["s3"]
 
 
 def test_segment_ledger_seed_initializes_pending_and_tracks_completed(tmp_path: Path) -> None:

@@ -6,6 +6,7 @@ import json
 import re
 import sqlite3
 import subprocess
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -25,10 +26,34 @@ from text_preserve import set_text_preserving_inline
 
 
 EN_HINTS = {"the", "and", "of", "to", "in", "for", "with", "that", "this", "is", "are"}
+EPUBCHECK_TIMEOUT_S = 120
+METRICS_BLOB_RE = re.compile(r"metrics\[(.*?)\]", re.IGNORECASE)
+METRICS_KV_RE = re.compile(r"([a-zA-Z_]+)\s*=\s*([^;]+)")
 
 
 def _txt(el: etree._Element) -> str:
     return etree.tostring(el, encoding="unicode", method="text").strip()
+
+
+def _parse_metrics_blob(message: str) -> Dict[str, float]:
+    out: Dict[str, float] = {}
+    text = str(message or "")
+    m = METRICS_BLOB_RE.search(text)
+    if not m:
+        return out
+    for key, raw in METRICS_KV_RE.findall(m.group(1)):
+        k = str(key).strip()
+        v = str(raw).strip().rstrip("%")
+        if not k:
+            continue
+        try:
+            if "." in v:
+                out[k] = float(v)
+            else:
+                out[k] = float(int(v))
+        except Exception:
+            continue
+    return out
 
 
 def _qa_scan_iter(epub: Path, segment_mode: str = "auto") -> Iterator[Dict[str, Any]]:
@@ -61,6 +86,23 @@ def _qa_scan_iter(epub: Path, segment_mode: str = "auto") -> Iterator[Dict[str, 
                 }
 
 
+def _safe_extract_zip(zf: zipfile.ZipFile, dest_dir: Path) -> None:
+    root = Path(dest_dir).resolve()
+    for info in zf.infolist():
+        name = str(info.filename or "").replace("\\", "/")
+        if not name:
+            continue
+        member_path = Path(name)
+        if member_path.is_absolute() or re.match(r"^[a-zA-Z]:", name):
+            raise ValueError(f"Unsafe zip entry path: {name}")
+        target = (root / member_path).resolve()
+        try:
+            target.relative_to(root)
+        except Exception:
+            raise ValueError(f"Unsafe zip entry path: {name}")
+    zf.extractall(root)
+
+
 class StudioSuiteWindow:
     def __init__(self, gui: Any) -> None:
         self.gui = gui
@@ -69,6 +111,7 @@ class StudioSuiteWindow:
         self.gui._configure_window_bounds(self.win, preferred_w=1200, preferred_h=820, min_w=760, min_h=520, maximize=True)
         self.db_path = gui.workdir / "translator_studio.db"
         self._tooltips: List[Any] = []
+        self._dash_release_notes_text = ""
         seg_mode = str(self.gui.db.get_setting("studio_segment_mode", "auto") or "auto").strip().lower()
         if seg_mode not in {"auto", "legacy"}:
             seg_mode = "auto"
@@ -84,6 +127,7 @@ class StudioSuiteWindow:
         self._build_check_tab(nb)
         self._build_ill_tab(nb)
         self._build_pipeline_tab(nb)
+        self._build_db_update_tab(nb)
         self._build_dashboard_tab(nb)
         self._build_plugins_tab(nb)
         self._install_tooltips()
@@ -735,9 +779,12 @@ class StudioSuiteWindow:
             title=self.gui.tr("studio.title.restore", "Restore"),
         ):
             return
-        with zipfile.ZipFile(p, "r") as z:
-            z.extractall(self.gui.workdir)
-        self._msg_info(self.gui.tr("studio.info.restored", "Restored."), title=self.gui.tr("mb.ok", "OK"))
+        try:
+            with zipfile.ZipFile(p, "r") as z:
+                _safe_extract_zip(z, self.gui.workdir)
+            self._msg_info(self.gui.tr("studio.info.restored", "Restored."), title=self.gui.tr("mb.ok", "OK"))
+        except Exception as e:
+            self._msg_error(f"Restore blocked: {e}", title=self.gui.tr("studio.title.restore", "Restore"))
 
     def _build_check_tab(self, nb: ttk.Notebook) -> None:
         tab = ttk.Frame(nb, padding=8); nb.add(tab, text=self.gui.tr("studio.tab.epubcheck", "EPUBCheck"))
@@ -752,8 +799,17 @@ class StudioSuiteWindow:
         if not e:
             return
         try:
-            p = subprocess.run(["epubcheck", e], capture_output=True, text=True, encoding="utf-8", errors="replace")
+            p = subprocess.run(
+                ["epubcheck", e],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=EPUBCHECK_TIMEOUT_S,
+            )
             out = (p.stdout or "") + "\n" + (p.stderr or "")
+        except subprocess.TimeoutExpired:
+            out = f"epubcheck timed out after {EPUBCHECK_TIMEOUT_S}s"
         except Exception as ex:
             out = f"epubcheck unavailable: {ex}"
         self.chk_log.delete("1.0", "end"); self.chk_log.insert("1.0", out)
@@ -785,9 +841,173 @@ class StudioSuiteWindow:
         self.gui.db.mark_project_pending(self.gui.current_project_id, "translate")
         self.gui._refresh_projects(select_current=True)
 
+    def _build_db_update_tab(self, nb: ttk.Notebook) -> None:
+        tab = ttk.Frame(nb, padding=8)
+        nb.add(tab, text="DB Update")
+
+        self.dbu_status_var = tk.StringVar(value="Status: idle")
+        top = ttk.Frame(tab)
+        top.pack(fill="x")
+        ttk.Button(top, text="Refresh status", command=self._dbu_refresh_status).pack(side="left")
+        ttk.Button(top, text="Run migrate", command=self._dbu_run_migrate).pack(side="left", padx=(8, 0))
+        ttk.Button(top, text="Rollback last", command=self._dbu_rollback_last).pack(side="left", padx=(8, 0))
+        ttk.Button(top, text="Export report", command=self._dbu_export_report).pack(side="left", padx=(8, 0))
+
+        ttk.Label(tab, textvariable=self.dbu_status_var, style="Sub.TLabel").pack(anchor="w", pady=(8, 4))
+        self.dbu_runs = tk.Listbox(tab, height=10)
+        self.dbu_runs.pack(fill="both", expand=False)
+
+        self.dbu_log = ScrolledText(tab, height=12, font=("Consolas", 9))
+        self.dbu_log.pack(fill="both", expand=True, pady=(8, 0))
+
+        self._dbu_refresh_status()
+
+    def _dbu_log(self, text: str) -> None:
+        self.dbu_log.insert("end", str(text))
+        self.dbu_log.see("end")
+
+    def _dbu_set_status(self, text: str) -> None:
+        self.dbu_status_var.set(str(text))
+
+    def _dbu_reload_main_db(self) -> None:
+        from project_db import ProjectDB
+
+        try:
+            self.gui.db.close()
+        except Exception:
+            pass
+        self.gui.db = ProjectDB(
+            self.db_path,
+            recover_runtime_state=True,
+            backup_paths=[self.gui.workdir / "data" / "series"],
+        )
+        self.gui._refresh_projects(select_current=True)
+        self.gui._refresh_profiles()
+        self.gui._refresh_series()
+        self.gui._refresh_run_history()
+        self.gui._refresh_ledger_status()
+
+    def _dbu_refresh_status(self) -> None:
+        from project_db import ProjectDB
+
+        db = ProjectDB(self.db_path, run_migrations=False)
+        try:
+            report = db.build_migration_report(limit=30)
+        finally:
+            db.close()
+
+        schema = int(report.get("schema_version", 0) or 0)
+        rows = report.get("rows", []) or []
+        self.dbu_runs.delete(0, "end")
+        for r in rows:
+            st = str(r.get("status", "")).strip()
+            frm = int(r.get("from_schema", 0) or 0)
+            to = int(r.get("to_schema", 0) or 0)
+            bid = int(r.get("id", 0) or 0)
+            bdir = str(r.get("backup_dir", "")).strip()
+            self.dbu_runs.insert("end", f"#{bid} {st} {frm}->{to} | {bdir}")
+        self._dbu_set_status(f"Status: schema={schema}, migrations={len(rows)}")
+
+    def _dbu_async(self, start_status: str, fn, done_ok_text: str) -> None:
+        self._dbu_set_status(start_status)
+        self._dbu_log(f"[DBU] {start_status}\n")
+
+        def worker() -> None:
+            try:
+                msg = fn()
+                self.win.after(0, lambda: self._dbu_log(f"[DBU] {msg}\n"))
+                self.win.after(0, lambda: self._dbu_set_status(done_ok_text))
+            except Exception as e:
+                err_text = str(e)
+                self.win.after(0, lambda: self._dbu_log(f"[DBU] ERROR: {err_text}\n"))
+                self.win.after(0, lambda: self._dbu_set_status("Status: error"))
+            finally:
+                self.win.after(0, self._dbu_refresh_status)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _dbu_run_migrate(self) -> None:
+        from project_db import ProjectDB
+
+        if self.gui.proc is not None:
+            self._msg_error("Cannot migrate while translation process is running.")
+            return
+
+        def run() -> str:
+            db = ProjectDB(
+                self.db_path,
+                recover_runtime_state=True,
+                backup_paths=[self.gui.workdir / "data" / "series"],
+            )
+            try:
+                if db.last_migration_summary:
+                    m = db.last_migration_summary
+                    msg = (
+                        f"Migration completed: {m.get('from_schema')} -> {m.get('to_schema')} "
+                        f"(backup: {m.get('backup_dir')})"
+                    )
+                else:
+                    msg = "Migration skipped: schema already current."
+            finally:
+                db.close()
+            self.win.after(0, self._dbu_reload_main_db)
+            return msg
+
+        self._dbu_async("Status: migration in progress...", run, "Status: migration done")
+
+    def _dbu_rollback_last(self) -> None:
+        from project_db import ProjectDB
+
+        if self.gui.proc is not None:
+            self._msg_error("Cannot rollback while translation process is running.")
+            return
+        if not self._ask_yes_no(
+            "Rollback przywroci poprzednia strukture/dane z backupu ostatniej migracji. Kontynuowac?",
+            title="DB Update",
+        ):
+            return
+
+        def run() -> str:
+            db = ProjectDB(self.db_path, run_migrations=False)
+            try:
+                ok, msg = db.rollback_last_migration()
+            finally:
+                db.close()
+            if not ok:
+                raise RuntimeError(msg)
+            self.win.after(0, self._dbu_reload_main_db)
+            return msg
+
+        self._dbu_async("Status: rollback in progress...", run, "Status: rollback done")
+
+    def _dbu_export_report(self) -> None:
+        from project_db import ProjectDB
+
+        out = filedialog.asksaveasfilename(
+            title="Save migration report",
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json"), ("All files", "*.*")],
+            initialdir=str(self.gui.workdir),
+            initialfile=f"migration_report_{time.strftime('%Y%m%d_%H%M%S')}.json",
+        )
+        if not out:
+            return
+        db = ProjectDB(self.db_path, run_migrations=False)
+        try:
+            report = db.build_migration_report(limit=200)
+        finally:
+            db.close()
+        Path(out).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        self._dbu_log(f"[DBU] Report saved: {out}\n")
+        self._dbu_set_status("Status: report exported")
+
     def _build_dashboard_tab(self, nb: ttk.Notebook) -> None:
         tab = ttk.Frame(nb, padding=8); nb.add(tab, text=self.gui.tr("studio.tab.dashboard", "Dashboard"))
-        ttk.Button(tab, text="Refresh", command=self._dash_refresh).pack(anchor="w")
+        bar = ttk.Frame(tab)
+        bar.pack(fill="x")
+        ttk.Button(bar, text="Refresh", command=self._dash_refresh).pack(side="left")
+        ttk.Button(bar, text="Copy release notes", command=self._dash_copy_release_notes).pack(side="left", padx=(8, 0))
+        ttk.Button(bar, text="Save release notes", command=self._dash_save_release_notes).pack(side="left", padx=(8, 0))
         self.dash = ScrolledText(tab, font=("Consolas", 10)); self.dash.pack(fill="both", expand=True, pady=(8, 0))
         self._dash_refresh()
 
@@ -821,7 +1041,7 @@ class StudioSuiteWindow:
                 ).fetchall()
                 latest_run = con.execute(
                     """
-                    SELECT id, status, started_at, finished_at
+                    SELECT id, step, status, message, started_at, finished_at
                     FROM runs
                     WHERE project_id = ? AND step = ?
                     ORDER BY started_at DESC
@@ -885,6 +1105,8 @@ class StudioSuiteWindow:
         api_out_tok = int(api_tgt_len / 4)
         api_total_tok = api_in_tok + api_out_tok
         latest_run_text = "n/a"
+        latest_metrics: Dict[str, float] = {}
+        latest_step = step
         if latest_run is not None:
             started = int(latest_run["started_at"] or 0)
             finished = int(latest_run["finished_at"] or 0)
@@ -897,6 +1119,12 @@ class StudioSuiteWindow:
             else:
                 finished_txt = "running"
             latest_run_text = f"{started_txt} -> {finished_txt} | status={str(latest_run['status'] or '')}"
+            latest_step = str(latest_run["step"] or step)
+            latest_metrics = _parse_metrics_blob(str(latest_run["message"] or ""))
+        g_retry = int(latest_metrics.get("google_retries", 0) or 0)
+        g_timeout = int(latest_metrics.get("google_timeouts", 0) or 0)
+        o_retry = int(latest_metrics.get("ollama_retries", 0) or 0)
+        o_timeout = int(latest_metrics.get("ollama_timeouts", 0) or 0)
         self.dash.delete("1.0", "end")
         self.dash.insert(
             "1.0",
@@ -911,6 +1139,7 @@ class StudioSuiteWindow:
         self.dash.insert("end", "\n")
         if self.gui.current_project_id is None:
             self.dash.insert("end", "Active project: n/a\n")
+            self._dash_release_notes_text = ""
             return
         self.dash.insert(
             "end",
@@ -920,12 +1149,93 @@ class StudioSuiteWindow:
             f"Latest run: {latest_run_text}\n"
             f"Latest run completed: api={api_completed} reuse={reuse_completed}\n"
             f"Latest run estimated API tokens: in={api_in_tok} out={api_out_tok} total={api_total_tok} "
-            f"(~M={api_total_tok/1_000_000:.3f})\n",
+            f"(~M={api_total_tok/1_000_000:.3f})\n"
+            f"Latest runtime retries/timeouts: Google r={g_retry} t={g_timeout} | Ollama r={o_retry} t={o_timeout}\n",
         )
         if by_provider:
             self.dash.insert("end", "Latest run by provider:\n")
             for line in by_provider:
                 self.dash.insert("end", line + "\n")
+        self._dash_release_notes_text = self._dash_build_release_notes(
+            project_id=int(self.gui.current_project_id),
+            step=latest_step,
+            ledger_counts=ledger_counts,
+            latest_run_text=latest_run_text,
+            api_completed=api_completed,
+            reuse_completed=reuse_completed,
+            api_in_tok=api_in_tok,
+            api_out_tok=api_out_tok,
+            api_total_tok=api_total_tok,
+            by_provider=by_provider,
+            g_retry=g_retry,
+            g_timeout=g_timeout,
+            o_retry=o_retry,
+            o_timeout=o_timeout,
+        )
+
+    def _dash_build_release_notes(
+        self,
+        *,
+        project_id: int,
+        step: str,
+        ledger_counts: Dict[str, int],
+        latest_run_text: str,
+        api_completed: int,
+        reuse_completed: int,
+        api_in_tok: int,
+        api_out_tok: int,
+        api_total_tok: int,
+        by_provider: List[str],
+        g_retry: int,
+        g_timeout: int,
+        o_retry: int,
+        o_timeout: int,
+    ) -> str:
+        lines = [
+            "## Runtime Metrics (M4)",
+            f"- Project: `{project_id}`",
+            f"- Step: `{step}`",
+            f"- Latest run: {latest_run_text}",
+            (
+                f"- Ledger: done={ledger_counts['COMPLETED']} processing={ledger_counts['PROCESSING']} "
+                f"error={ledger_counts['ERROR']} pending={ledger_counts['PENDING']}"
+            ),
+            f"- Completed segments: api={api_completed}, reuse={reuse_completed}",
+            f"- Estimated API tokens: in={api_in_tok}, out={api_out_tok}, total={api_total_tok} (~M={api_total_tok/1_000_000:.3f})",
+            f"- Retry/timeout: Google r={g_retry}, t={g_timeout}; Ollama r={o_retry}, t={o_timeout}",
+        ]
+        if by_provider:
+            lines.append("- Provider distribution:")
+            lines.extend([f"  {x}" for x in by_provider])
+        return "\n".join(lines).strip() + "\n"
+
+    def _dash_copy_release_notes(self) -> None:
+        if not self._dash_release_notes_text.strip():
+            self._dash_refresh()
+        if not self._dash_release_notes_text.strip():
+            self._msg_info("Brak danych do release notes.")
+            return
+        self.win.clipboard_clear()
+        self.win.clipboard_append(self._dash_release_notes_text)
+        self._msg_info("Release notes skopiowane do schowka.")
+
+    def _dash_save_release_notes(self) -> None:
+        if not self._dash_release_notes_text.strip():
+            self._dash_refresh()
+        if not self._dash_release_notes_text.strip():
+            self._msg_info("Brak danych do zapisania.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Save release notes",
+            initialdir=str(self.gui.workdir),
+            defaultextension=".md",
+            filetypes=[("Markdown", "*.md"), ("Text", "*.txt"), ("All", "*.*")],
+            initialfile=f"release_notes_metrics_{time.strftime('%Y%m%d_%H%M%S')}.md",
+        )
+        if not path:
+            return
+        Path(path).write_text(self._dash_release_notes_text, encoding="utf-8")
+        self._msg_info(f"Zapisano release notes: {Path(path).name}")
 
     def _build_plugins_tab(self, nb: ttk.Notebook) -> None:
         tab = ttk.Frame(nb, padding=8); nb.add(tab, text=self.gui.tr("studio.tab.plugins", "Provider Plugins"))

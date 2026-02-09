@@ -50,7 +50,7 @@ from runtime_core import (
     list_ollama_models as core_list_ollama_models,
 )
 from series_store import SeriesStore, detect_series_hint
-from text_preserve import set_text_preserving_inline
+from text_preserve import set_text_preserving_inline, tokenize_inline_markup, apply_tokenized_inline_markup
 from ui_style import apply_app_theme
 
 APP_TITLE = "EPUB Translator Studio"
@@ -65,6 +65,8 @@ SERIES_DATA_DIR = Path(__file__).resolve().with_name("data").joinpath("series")
 PROMPT_PRESETS_FILE = Path(__file__).resolve().with_name("prompt_presets.json")
 GOOGLE_KEYRING_SERVICE = "epub-translator-studio"
 GOOGLE_KEYRING_USER = "google_api_key"
+EPUBCHECK_TIMEOUT_S = 120
+APP_RUNTIME_VERSION = "0.5.0"
 GLOBAL_PROGRESS_RE = re.compile(r"GLOBAL\s+(\d+)\s*/\s*(\d+)\s*\(([^)]*)\)\s*\|\s*(.*)")
 TOTAL_SEGMENTS_RE = re.compile(r"Segmenty\s+(?:Äąâ€šĂ„â€¦cznie|lacznie)\s*:\s*(\d+)", re.IGNORECASE)
 CACHE_SEGMENTS_RE = re.compile(r"Segmenty\s+z\s+cache\s*:\s*(\d+)", re.IGNORECASE)
@@ -73,6 +75,10 @@ METRICS_BLOB_RE = re.compile(r"metrics\[(.*?)\]", re.IGNORECASE)
 METRICS_KV_RE = re.compile(r"([a-zA-Z_]+)\s*=\s*([^;]+)")
 EPUBCHECK_SEVERITY_RE = re.compile(r"\b(FATAL|ERROR|WARNING)\b", re.IGNORECASE)
 INLINE_TOKEN_RE = re.compile(r"\[\[TAG\d{3}\]\]")
+GOOGLE_HTTP_RETRY_RE = re.compile(r"\[Google\]\s+HTTP\s+\d+.*(?:pr[oó]ba|attempt)\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
+GOOGLE_TIMEOUT_RE = re.compile(r"\[Google\]\s+timeout/conn error.*(?:pr[oó]ba|attempt)\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
+OLLAMA_TIMEOUT_RE = re.compile(r"\[Ollama\]\s+timeout/conn error.*(?:pr[oó]ba|attempt)\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
+LEDGER_ERROR_ALERT_THRESHOLD = 5
 LOG = logging.getLogger(__name__)
 
 
@@ -174,10 +180,29 @@ class TranslatorGUI:
         self.workdir = Path(__file__).resolve().parent
         self.events_log_path = self.workdir / "events" / "app_events.jsonl"
         self.translator_path = self._find_translator()
-        self.db = ProjectDB(SQLITE_FILE)
+        self.db = ProjectDB(
+            SQLITE_FILE,
+            recover_runtime_state=True,
+            backup_paths=[SERIES_DATA_DIR],
+        )
+        self._startup_notices: List[str] = []
+        if self.db.last_migration_summary:
+            m = self.db.last_migration_summary
+            self._startup_notices.append(
+                "Wykryto zmiane struktury danych. "
+                f"Przeprowadzono konwersje schema {m.get('from_schema')} -> {m.get('to_schema')}. "
+                f"Backup: {m.get('backup_dir')}"
+            )
         self.series_store = SeriesStore(SERIES_DATA_DIR)
         ui_lang = str(self.db.get_setting("ui_language", "pl") or "pl").strip().lower()
         self.i18n = I18NManager(LOCALES_DIR, ui_lang)
+        prev_runtime_version = str(self.db.get_setting("app_runtime_version", "") or "").strip()
+        if prev_runtime_version and prev_runtime_version != APP_RUNTIME_VERSION:
+            self._startup_notices.append(
+                f"Uzywales wersji {prev_runtime_version}, teraz uruchomiona jest {APP_RUNTIME_VERSION}. "
+                "Sprawdz notatki aktualizacji i log konwersji danych."
+            )
+        self.db.set_setting("app_runtime_version", APP_RUNTIME_VERSION)
         mode_raw = str(self.db.get_setting("tooltip_mode", "hybrid") or "hybrid").strip().lower()
         if mode_raw not in {"short", "expert", "hybrid"}:
             mode_raw = "hybrid"
@@ -213,9 +238,11 @@ class TranslatorGUI:
         self.ui_tokens: Dict[str, Any] = {}
         self._runtime_metrics: Dict[str, int] = {}
         self._runtime_metric_lines: set[str] = set()
+        self._runtime_retry_lines: set[str] = set()
         self.prompt_presets: List[Dict[str, str]] = []
         self.prompt_preset_by_label: Dict[str, Dict[str, str]] = {}
         self._ledger_counts: Dict[str, int] = {"PENDING": 0, "PROCESSING": 0, "COMPLETED": 0, "ERROR": 0}
+        self._ledger_alert_key: Optional[Tuple[int, str, int]] = None
         self._reset_runtime_metrics()
 
         self._configure_main_window()
@@ -236,6 +263,7 @@ class TranslatorGUI:
         self._update_command_preview()
         self._refresh_ledger_status()
         self._poll_log_queue()
+        self._show_startup_notices()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _setup_theme(self) -> None:
@@ -260,8 +288,13 @@ class TranslatorGUI:
             "total_segments": 0,
             "cache_hits": 0,
             "tm_hits": 0,
+            "google_retries": 0,
+            "google_timeouts": 0,
+            "ollama_retries": 0,
+            "ollama_timeouts": 0,
         }
         self._runtime_metric_lines.clear()
+        self._runtime_retry_lines.clear()
 
     def _format_duration(self, seconds: Optional[int]) -> str:
         if seconds is None:
@@ -280,10 +313,16 @@ class TranslatorGUI:
         tm_hits = int(self._runtime_metrics.get("tm_hits", 0) or 0)
         reuse_hits = cache_hits + tm_hits
         reuse_rate = (reuse_hits / total) * 100.0 if total > 0 else 0.0
+        g_retry = int(self._runtime_metrics.get("google_retries", 0) or 0)
+        g_timeout = int(self._runtime_metrics.get("google_timeouts", 0) or 0)
+        o_retry = int(self._runtime_metrics.get("ollama_retries", 0) or 0)
+        o_timeout = int(self._runtime_metrics.get("ollama_timeouts", 0) or 0)
         dur_s = int(max(0.0, time.time() - self.run_started_at)) if self.run_started_at is not None else 0
         return (
             f"metrics[dur_s={dur_s};done={done};total={total};cache_hits={cache_hits};"
-            f"tm_hits={tm_hits};reuse_hits={reuse_hits};reuse_rate={reuse_rate:.1f}]"
+            f"tm_hits={tm_hits};reuse_hits={reuse_hits};reuse_rate={reuse_rate:.1f};"
+            f"google_retries={g_retry};google_timeouts={g_timeout};"
+            f"ollama_retries={o_retry};ollama_timeouts={o_timeout}]"
         )
 
     def _parse_metrics_blob(self, message: str) -> Dict[str, float]:
@@ -315,10 +354,15 @@ class TranslatorGUI:
         tm_hits = int(self._runtime_metrics.get("tm_hits", 0) or 0)
         reuse_hits = cache_hits + tm_hits
         reuse_rate = (reuse_hits / total) * 100.0 if total > 0 else 0.0
+        g_retry = int(self._runtime_metrics.get("google_retries", 0) or 0)
+        g_timeout = int(self._runtime_metrics.get("google_timeouts", 0) or 0)
+        o_retry = int(self._runtime_metrics.get("ollama_retries", 0) or 0)
+        o_timeout = int(self._runtime_metrics.get("ollama_timeouts", 0) or 0)
         dur_s = int(max(0.0, time.time() - self.run_started_at))
         self.run_metrics_var.set(
             f"Metryki runu: czas={self._format_duration(dur_s)} | seg={done}/{total} | "
-            f"cache={cache_hits} | tm={tm_hits} | reuse={reuse_rate:.1f}%"
+            f"cache={cache_hits} | tm={tm_hits} | reuse={reuse_rate:.1f}% | "
+            f"G(r={g_retry},t={g_timeout}) O(r={o_retry},t={o_timeout})"
         )
 
     def _collect_runtime_metrics_from_log(self, line: str) -> None:
@@ -344,6 +388,37 @@ class TranslatorGUI:
                 self._runtime_metrics["tm_hits"] += max(0, int(m_tm.group(2)))
             except Exception:
                 pass
+        if s not in self._runtime_retry_lines:
+            self._runtime_retry_lines.add(s)
+            m_g_http = GOOGLE_HTTP_RETRY_RE.search(s)
+            if m_g_http:
+                try:
+                    attempt = int(m_g_http.group(1))
+                    max_attempts = int(m_g_http.group(2))
+                    if attempt < max_attempts:
+                        self._runtime_metrics["google_retries"] += 1
+                except Exception:
+                    pass
+            m_g_timeout = GOOGLE_TIMEOUT_RE.search(s)
+            if m_g_timeout:
+                self._runtime_metrics["google_timeouts"] += 1
+                try:
+                    attempt = int(m_g_timeout.group(1))
+                    max_attempts = int(m_g_timeout.group(2))
+                    if attempt < max_attempts:
+                        self._runtime_metrics["google_retries"] += 1
+                except Exception:
+                    pass
+            m_o_timeout = OLLAMA_TIMEOUT_RE.search(s)
+            if m_o_timeout:
+                self._runtime_metrics["ollama_timeouts"] += 1
+                try:
+                    attempt = int(m_o_timeout.group(1))
+                    max_attempts = int(m_o_timeout.group(2))
+                    if attempt < max_attempts:
+                        self._runtime_metrics["ollama_retries"] += 1
+                except Exception:
+                    pass
 
     def _configure_window_bounds(
         self,
@@ -572,6 +647,15 @@ class TranslatorGUI:
         self.inline_notice_var.set("")
         self._inline_notice_after_id = None
 
+    def _show_startup_notices(self) -> None:
+        if not self._startup_notices:
+            return
+        msg = " | ".join([str(x).strip() for x in self._startup_notices if str(x).strip()])
+        if not msg:
+            return
+        self._append_log("[UPDATE] " + msg + "\n")
+        self._set_inline_notice(msg, level="warn", timeout_ms=18000)
+
     def tr(self, key: str, default: str, **fmt: Any) -> str:
         return self.i18n.t(key, default, **fmt)
 
@@ -627,6 +711,9 @@ class TranslatorGUI:
         self.use_glossary_var = tk.BooleanVar(value=True)
         self.hard_gate_epubcheck_var = tk.BooleanVar(value=True)
         self.checkpoint_var = tk.StringVar(value="0")
+        self.context_window_var = tk.StringVar(value="0")
+        self.context_neighbor_max_chars_var = tk.StringVar(value="180")
+        self.context_segment_max_chars_var = tk.StringVar(value="1200")
         self.tooltip_mode_var = tk.StringVar(value=self.tooltip_mode)
         self.ui_language_var = tk.StringVar(value=self.i18n.lang)
         self.source_lang_var = tk.StringVar(value="en")
@@ -1237,23 +1324,30 @@ class TranslatorGUI:
         ttk.Checkbutton(card, text="UÄąÄ˝yj cache", variable=self.use_cache_var, command=self._update_command_preview).grid(row=5, column=0, sticky="w", pady=(8, 0))
         ttk.Checkbutton(card, text="UÄąÄ˝yj sÄąâ€šownika", variable=self.use_glossary_var, command=self._update_command_preview).grid(row=5, column=1, columnspan=2, sticky="w", pady=(8, 0))
 
-        ttk.Label(card, text=self.tr("label.tooltip_mode", "Tooltip mode:")).grid(row=6, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(card, text=self.tr("label.context_window", "Smart context window:")).grid(row=6, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(card, textvariable=self.context_window_var, width=12).grid(row=6, column=1, sticky="w", pady=(8, 0))
+        ttk.Label(card, text=self.tr("label.context_neighbor_max_chars", "Context max chars (neighbor):")).grid(row=6, column=2, sticky="w", padx=(12, 0), pady=(8, 0))
+        ttk.Entry(card, textvariable=self.context_neighbor_max_chars_var, width=12).grid(row=6, column=3, sticky="w", pady=(8, 0))
+        ttk.Label(card, text=self.tr("label.context_segment_max_chars", "Context max chars (segment):")).grid(row=6, column=4, sticky="w", padx=(12, 0), pady=(8, 0))
+        ttk.Entry(card, textvariable=self.context_segment_max_chars_var, width=12).grid(row=6, column=5, sticky="w", pady=(8, 0))
+
+        ttk.Label(card, text=self.tr("label.tooltip_mode", "Tooltip mode:")).grid(row=7, column=0, sticky="w", pady=(8, 0))
         tip_combo = ttk.Combobox(card, textvariable=self.tooltip_mode_var, state="readonly", width=14)
         tip_combo["values"] = ["hybrid", "short", "expert"]
-        tip_combo.grid(row=6, column=1, sticky="w", pady=(8, 0))
+        tip_combo.grid(row=7, column=1, sticky="w", pady=(8, 0))
         tip_combo.bind("<<ComboboxSelected>>", lambda _: self._on_tooltip_mode_change())
 
-        ttk.Label(card, text=self.tr("label.ui_language", "Jezyk UI:")).grid(row=6, column=2, sticky="w", padx=(12, 0), pady=(8, 0))
+        ttk.Label(card, text=self.tr("label.ui_language", "Jezyk UI:")).grid(row=7, column=2, sticky="w", padx=(12, 0), pady=(8, 0))
         ui_combo = ttk.Combobox(card, textvariable=self.ui_language_var, state="readonly", width=14)
         ui_combo["values"] = list(SUPPORTED_UI_LANGS.keys())
-        ui_combo.grid(row=6, column=3, sticky="w", pady=(8, 0))
+        ui_combo.grid(row=7, column=3, sticky="w", pady=(8, 0))
         ui_combo.bind("<<ComboboxSelected>>", lambda _: self._on_ui_language_change())
         ttk.Button(
             card,
             text=self.tr("button.ai_translate_gui", "AI: szkic tlumaczenia GUI"),
             command=self._ai_translate_ui_language,
             style="Secondary.TButton",
-        ).grid(row=6, column=4, columnspan=2, sticky="w", padx=(12, 0), pady=(8, 0))
+        ).grid(row=7, column=4, columnspan=2, sticky="w", padx=(12, 0), pady=(8, 0))
 
         for i in range(6):
             card.columnconfigure(i, weight=1)
@@ -2108,13 +2202,18 @@ class TranslatorGUI:
         tm_hits = int(parsed.get("tm_hits", 0) or 0)
         reuse_hits = int(parsed.get("reuse_hits", cache_hits + tm_hits) or 0)
         reuse_rate = float(parsed.get("reuse_rate", 0.0) or 0.0)
+        google_retries = int(parsed.get("google_retries", 0) or 0)
+        google_timeouts = int(parsed.get("google_timeouts", 0) or 0)
+        ollama_retries = int(parsed.get("ollama_retries", 0) or 0)
+        ollama_timeouts = int(parsed.get("ollama_timeouts", 0) or 0)
         if total > 0 and reuse_rate <= 0.0 and reuse_hits > 0:
             reuse_rate = (reuse_hits / total) * 100.0
         status = self._normalize_stage_status(str(last["status"] or "none"))
         step = str(last["step"] or "-")
         self.run_metrics_var.set(
             f"Ostatni run: {step}/{status} | czas={self._format_duration(duration_s)} | "
-            f"seg={done}/{total} | cache={cache_hits} | tm={tm_hits} | reuse={reuse_rate:.1f}%"
+            f"seg={done}/{total} | cache={cache_hits} | tm={tm_hits} | reuse={reuse_rate:.1f}% | "
+            f"G(r={google_retries},t={google_timeouts}) O(r={ollama_retries},t={ollama_timeouts})"
         )
 
     def _export_project(self) -> None:
@@ -2990,6 +3089,9 @@ class TranslatorGUI:
             tm_db=str(SQLITE_FILE),
             tm_project_id=self.current_project_id,
             run_step=(self.mode_var.get().strip().lower() or "translate"),
+            context_window=self.context_window_var.get().strip(),
+            context_neighbor_max_chars=self.context_neighbor_max_chars_var.get().strip(),
+            context_segment_max_chars=self.context_segment_max_chars_var.get().strip(),
         )
         return core_build_run_command(self._translator_cmd_prefix(), opts, tm_fuzzy_threshold="0.92")
 
@@ -3007,7 +3109,10 @@ class TranslatorGUI:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                timeout=EPUBCHECK_TIMEOUT_S,
             )
+        except subprocess.TimeoutExpired:
+            return False, f"[EPUBCHECK-GATE] FAIL: epubcheck timed out after {EPUBCHECK_TIMEOUT_S}s"
         except Exception as e:
             return False, f"[EPUBCHECK-GATE] FAIL: epubcheck unavailable: {e}"
 
@@ -3060,6 +3165,9 @@ class TranslatorGUI:
             ("timeout", self.timeout_var.get().strip()),
             ("attempts", self.attempts_var.get().strip()),
             ("checkpoint", self.checkpoint_var.get().strip()),
+            ("context-window", self.context_window_var.get().strip()),
+            ("context-neighbor-max-chars", self.context_neighbor_max_chars_var.get().strip()),
+            ("context-segment-max-chars", self.context_segment_max_chars_var.get().strip()),
         ]:
             try:
                 int(v)
@@ -3226,11 +3334,28 @@ class TranslatorGUI:
         total = sum(counts.values())
         if project_id is None:
             self.ledger_status_var.set(self.tr("status.ledger.no_project", "Ledger: select project"))
+            self._ledger_alert_key = None
         elif not available:
             self.ledger_status_var.set(self.tr("status.ledger.unavailable", "Ledger: unavailable (run translation once)"))
+            self._ledger_alert_key = None
         elif total <= 0:
             self.ledger_status_var.set(self.tr("status.ledger.empty", "Ledger: no segments yet"))
+            self._ledger_alert_key = None
         else:
+            err_count = int(counts["ERROR"] or 0)
+            alert_suffix = ""
+            if err_count > LEDGER_ERROR_ALERT_THRESHOLD:
+                alert_suffix = f" | ALERT: error>{LEDGER_ERROR_ALERT_THRESHOLD}"
+                alert_key = (int(project_id), str(step), err_count)
+                if self._ledger_alert_key != alert_key:
+                    self._ledger_alert_key = alert_key
+                    self._set_inline_notice(
+                        f"Ledger alert: errors={err_count} (threshold>{LEDGER_ERROR_ALERT_THRESHOLD}).",
+                        level="warn",
+                        timeout_ms=9000,
+                    )
+            else:
+                self._ledger_alert_key = None
             self.ledger_status_var.set(
                 self.tr(
                     "status.ledger.summary",
@@ -3241,6 +3366,7 @@ class TranslatorGUI:
                     pending=counts["PENDING"],
                     total=total,
                 )
+                + alert_suffix
             )
         self._draw_ledger_bar()
 
@@ -3335,12 +3461,7 @@ class TranslatorGUI:
                     if not gate_ok:
                         self.log_queue.put("\n=== EPUBCHECK GATE BLOCKED ===\n")
                         code = 86
-                if (
-                    code == 0
-                    and bool(self.hard_gate_epubcheck_var.get())
-                    and self.current_project_id is not None
-                    and runner_db is not None
-                ):
+                if code == 0 and self.current_project_id is not None and runner_db is not None:
                     qa_sev_ok, qa_sev_msg = runner_db.qa_severity_gate_status(
                         self.current_project_id,
                         run_step,
@@ -3617,6 +3738,9 @@ class TranslatorGUI:
             "use_glossary": self.use_glossary_var.get(),
             "hard_gate_epubcheck": self.hard_gate_epubcheck_var.get(),
             "checkpoint": self.checkpoint_var.get(),
+            "context_window": self.context_window_var.get(),
+            "context_neighbor_max_chars": self.context_neighbor_max_chars_var.get(),
+            "context_segment_max_chars": self.context_segment_max_chars_var.get(),
             "source_lang": self.source_lang_var.get(),
             "target_lang": self.target_lang_var.get(),
         }
@@ -3654,6 +3778,13 @@ class TranslatorGUI:
         self.use_glossary_var.set(bool(data.get("use_glossary", self.use_glossary_var.get())))
         self.hard_gate_epubcheck_var.set(bool(data.get("hard_gate_epubcheck", self.hard_gate_epubcheck_var.get())))
         self.checkpoint_var.set(data.get("checkpoint", self.checkpoint_var.get()))
+        self.context_window_var.set(str(data.get("context_window", self.context_window_var.get() or "0")))
+        self.context_neighbor_max_chars_var.set(
+            str(data.get("context_neighbor_max_chars", self.context_neighbor_max_chars_var.get() or "180"))
+        )
+        self.context_segment_max_chars_var.set(
+            str(data.get("context_segment_max_chars", self.context_segment_max_chars_var.get() or "1200"))
+        )
         self.tooltip_mode_var.set(str(data.get("tooltip_mode", self.tooltip_mode_var.get() or "hybrid")))
         self.source_lang_var.set(str(data.get("source_lang", self.source_lang_var.get() or "en")))
         self.target_lang_var.set(str(data.get("target_lang", self.target_lang_var.get() or "pl")))
@@ -3717,7 +3848,19 @@ class TranslatorGUI:
 
 def main() -> int:
     root = tk.Tk()
-    TranslatorGUI(root)
+    try:
+        TranslatorGUI(root)
+    except Exception as e:
+        try:
+            messagebox.showerror(
+                "Migration Error",
+                "Nie udalo sie uruchomic aplikacji po aktualizacji.\n\n"
+                f"Szczegoly:\n{e}\n\n"
+                "Sprawdz folder backupow migracji i sproboj ponownie.",
+            )
+        finally:
+            root.destroy()
+        return 2
     root.mainloop()
     return 0
 
@@ -3814,19 +3957,7 @@ class TextEditorWindow:
         self._tooltips = install_tooltips(self.win, resolver)
 
     def _tokenize_inline_segment(self, el: etree._Element) -> Tuple[str, Dict[str, str]]:
-        token_map: Dict[str, str] = {}
-        parts: List[str] = []
-        if el.text:
-            parts.append(str(el.text))
-        token_no = 1
-        for child in list(el):
-            token = f"[[TAG{token_no:03d}]]"
-            token_no += 1
-            token_map[token] = etree.tostring(child, encoding="unicode", method="xml", with_tail=False)
-            parts.append(token)
-            if child.tail:
-                parts.append(str(child.tail))
-        return "".join(parts), token_map
+        return tokenize_inline_markup(el)
 
     def _render_editor_text(self, text: str) -> None:
         self.editor.delete("1.0", "end")
@@ -3913,32 +4044,7 @@ class TextEditorWindow:
         )
 
     def _apply_tokenized_segment_text(self, el: etree._Element, text: str, token_map: Dict[str, str]) -> None:
-        for c in list(el):
-            el.remove(c)
-        el.text = None
-        pos = 0
-        prev_child: Optional[etree._Element] = None
-        for m in INLINE_TOKEN_RE.finditer(text):
-            plain = text[pos:m.start()]
-            if plain:
-                if prev_child is None:
-                    el.text = (el.text or "") + plain
-                else:
-                    prev_child.tail = (prev_child.tail or "") + plain
-            token = m.group(0)
-            child_raw = token_map.get(token)
-            if child_raw is None:
-                raise ValueError(f"Missing token payload: {token}")
-            child = etree.fromstring(child_raw.encode("utf-8"))
-            el.append(child)
-            prev_child = child
-            pos = m.end()
-        tail = text[pos:]
-        if tail:
-            if prev_child is None:
-                el.text = (el.text or "") + tail
-            else:
-                prev_child.tail = (prev_child.tail or "") + tail
+        apply_tokenized_inline_markup(el, text, token_map)
 
     def _on_chapter_selected(self) -> None:
         sel = self.chapter_box.curselection()
