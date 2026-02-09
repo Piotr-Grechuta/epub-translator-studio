@@ -4164,6 +4164,168 @@ class TranslatorGUI:
         self._update_live_run_metrics()
         self.root.after(1000, self._tick_activity)
 
+    def _prepare_run_start(self, run_step: str, redacted_cmd: str) -> None:
+        self.global_done = 0
+        self.global_total = 0
+        self._reset_runtime_metrics()
+        self._append_log("\n=== START ===\n")
+        self._append_log("Komenda: " + redacted_cmd + "\n\n")
+        log_event_jsonl(
+            self.events_log_path,
+            "run_start",
+            {"project_id": self.current_project_id, "mode": run_step, "command": redacted_cmd},
+        )
+        self.db.log_audit_event("run_start", {"project_id": self.current_project_id, "mode": run_step})
+        if self.current_project_id is not None:
+            try:
+                self.current_run_id = self.db.start_run(self.current_project_id, run_step, redacted_cmd)
+            except Exception:
+                self.current_run_id = None
+
+        self.progress_value_var.set(0.0)
+        self.progress_text_var.set(self.tr("status.progress.zero", "Progress: 0 / 0"))
+        self.phase_var.set(self.tr("status.phase.starting", "Phase: starting"))
+        self._refresh_ledger_status()
+        self.run_started_at = time.time()
+        self.last_log_at = self.run_started_at
+        self._update_live_run_metrics()
+        self.start_btn.configure(state="disabled")
+        self.validate_btn.configure(state="disabled")
+        self.stop_btn.configure(state="normal")
+        self._set_status(self.tr("status.translation.running", "Translation in progress..."), "running")
+        self.root.after(1000, self._tick_activity)
+
+    def _build_runtime_env(self, provider: str, google_api_key: str) -> Dict[str, str]:
+        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+        if provider == "google" and google_api_key:
+            env[GOOGLE_API_KEY_ENV] = google_api_key
+        return env
+
+    def _apply_run_finish_gates(self, code: int, runner_db: Optional[ProjectDB], run_step: str) -> int:
+        final_code = int(code)
+        if final_code == 0 and bool(self.hard_gate_epubcheck_var.get()):
+            self.log_queue.put("[EPUBCHECK-GATE] Running epubcheck...\n")
+            gate_ok, gate_msg = self._run_epubcheck_gate(Path(self.output_epub_var.get().strip()))
+            self.log_queue.put(gate_msg + "\n")
+            if not gate_ok:
+                self.log_queue.put("\n=== EPUBCHECK GATE BLOCKED ===\n")
+                final_code = 86
+
+        if final_code == 0 and self.current_project_id is not None and runner_db is not None:
+            qa_sev_ok, qa_sev_msg = runner_db.qa_severity_gate_status(
+                self.current_project_id,
+                run_step,
+                severities=("fatal", "error"),
+            )
+            self.log_queue.put(f"[QA-SEVERITY-GATE] {qa_sev_msg}\n")
+            if not qa_sev_ok:
+                self.log_queue.put("\n=== QA SEVERITY GATE BLOCKED ===\n")
+                final_code = 87
+        return final_code
+
+    def _maybe_mark_edit_pending_after_translate(self, runner_db: Optional[ProjectDB], run_step: str) -> None:
+        if self.current_project_id is None or run_step != "translate":
+            return
+        edit_cfg = self.step_values.get("edit", {})
+        gate_ok, gate_msg = runner_db.qa_gate_status(self.current_project_id, step="translate") if runner_db else (True, "")
+        if not gate_ok:
+            if runner_db:
+                runner_db.update_project(self.current_project_id, {"status": "needs_review"})
+            self.log_queue.put(f"[QA-GATE] {self.tr('log.qa_gate_blocked', 'Auto transition to edit blocked.')}" + f" {gate_msg}\n")
+            return
+        if (edit_cfg.get("output", "") or "").strip() and (edit_cfg.get("prompt", "") or "").strip():
+            if runner_db:
+                runner_db.mark_project_pending(self.current_project_id, "edit")
+                runner_db.update_project(self.current_project_id, {"status": "pending"})
+
+    def _handle_run_success(self, runner_db: Optional[ProjectDB], run_step: str) -> None:
+        self.log_queue.put("\n=== " + self.tr("log.run_ok", "RUN OK") + " ===\n")
+        self.root.after(0, lambda: self._set_status(self.tr("status.done", "Finished"), "ok"))
+        self.root.after(0, lambda: self.phase_var.set(self.tr("status.phase.done", "Phase: finished")))
+        self.root.after(0, lambda: self.progress_value_var.set(100.0 if self.progress_value_var.get() > 0 else self.progress_value_var.get()))
+        metrics_blob = self._runtime_metrics_blob()
+        self._maybe_mark_edit_pending_after_translate(runner_db, run_step)
+        if self.current_run_id is not None and runner_db:
+            runner_db.finish_run(
+                self.current_run_id,
+                status="ok",
+                message=f"Run finished | {metrics_blob}",
+                global_done=self.global_done,
+                global_total=self.global_total,
+            )
+        if runner_db and self.current_project_id is not None and run_step in {"translate", "edit"}:
+            try:
+                self._sync_series_terms_after_run(runner_db, self.current_project_id)
+            except Exception as e:
+                self.log_queue.put(f"[SERIES] Pominieto sync slownika serii: {e}\n")
+        log_event_jsonl(
+            self.events_log_path,
+            "run_finish",
+            {"project_id": self.current_project_id, "status": "ok", "done": self.global_done, "total": self.global_total},
+        )
+        if runner_db:
+            runner_db.log_audit_event("run_finish", {"project_id": self.current_project_id, "status": "ok"})
+
+    def _handle_run_failure(self, runner_db: Optional[ProjectDB], exit_code: int) -> None:
+        self.log_queue.put("\n=== " + self.tr("log.run_error_exit", "RUN ERROR (exit={code})", code=exit_code) + " ===\n")
+        self.root.after(0, lambda: self._set_status(self.tr("status.process_error", "Process error"), "error"))
+        self.root.after(0, lambda: self.phase_var.set(self.tr("status.phase.error", "Phase: error")))
+        metrics_blob = self._runtime_metrics_blob()
+        if self.current_run_id is not None and runner_db:
+            runner_db.finish_run(
+                self.current_run_id,
+                status="error",
+                message=f"exit={exit_code} | {metrics_blob}",
+                global_done=self.global_done,
+                global_total=self.global_total,
+            )
+        log_event_jsonl(
+            self.events_log_path,
+            "run_finish",
+            {"project_id": self.current_project_id, "status": "error", "done": self.global_done, "total": self.global_total},
+        )
+        if runner_db:
+            runner_db.log_audit_event("run_finish", {"project_id": self.current_project_id, "status": "error"})
+
+    def _handle_run_exception(self, runner_db: Optional[ProjectDB], err: Exception) -> None:
+        self.log_queue.put(f"\n{self.tr('log.start_error', 'Startup error')}: {err}\n")
+        self.root.after(0, lambda: self._set_status(self.tr("status.start_error", "Startup error"), "error"))
+        self.root.after(0, lambda: self.phase_var.set(self.tr("status.phase.start_error", "Phase: startup error")))
+        metrics_blob = self._runtime_metrics_blob()
+        if self.current_run_id is not None and runner_db:
+            runner_db.finish_run(
+                self.current_run_id,
+                status="error",
+                message=f"{err} | {metrics_blob}",
+                global_done=self.global_done,
+                global_total=self.global_total,
+            )
+        log_event_jsonl(
+            self.events_log_path,
+            "run_finish",
+            {"project_id": self.current_project_id, "status": "exception", "error": str(err)},
+        )
+        if runner_db:
+            runner_db.log_audit_event("run_finish", {"project_id": self.current_project_id, "status": "exception"})
+
+    def _finalize_run_thread(self, runner_db: Optional[ProjectDB]) -> None:
+        if runner_db is not None:
+            runner_db.close()
+        self.current_run_id = None
+        self.proc = None
+        self.run_started_at = None
+        self.last_log_at = None
+        self.root.after(0, self._refresh_projects)
+        self.root.after(0, self._refresh_run_history)
+        self.root.after(0, self._refresh_ledger_status)
+        self.root.after(0, lambda: self.start_btn.configure(state="normal"))
+        self.root.after(0, lambda: self.validate_btn.configure(state="normal"))
+        self.root.after(0, lambda: self.stop_btn.configure(state="disabled"))
+        if self.run_all_active:
+            self.root.after(200, self._continue_run_all)
+        elif self.series_batch_context is not None and bool(self.series_batch_context.get("stopped")):
+            self.root.after(200, lambda: self._finalize_series_batch("stopped"))
+
     def _start_process(self) -> None:
         err = self._validate()
         if err:
@@ -4181,44 +4343,13 @@ class TranslatorGUI:
         run_step = self.mode_var.get().strip() or "translate"
         cmd = self._build_command()
         redacted = self._redacted_cmd(cmd)
-        self.global_done = 0
-        self.global_total = 0
-        self._reset_runtime_metrics()
-        self._append_log("\n=== START ===\n")
-        self._append_log("Komenda: " + redacted + "\n\n")
-        log_event_jsonl(
-            self.events_log_path,
-            "run_start",
-            {"project_id": self.current_project_id, "mode": run_step, "command": redacted},
-        )
-        self.db.log_audit_event("run_start", {"project_id": self.current_project_id, "mode": run_step})
-        if self.current_project_id is not None:
-            try:
-                self.current_run_id = self.db.start_run(self.current_project_id, run_step, redacted)
-            except Exception:
-                self.current_run_id = None
-
-        self.progress_value_var.set(0.0)
-        self.progress_text_var.set(self.tr("status.progress.zero", "Progress: 0 / 0"))
-        self.phase_var.set(self.tr("status.phase.starting", "Phase: starting"))
-        self._refresh_ledger_status()
-        self.run_started_at = time.time()
-        self.last_log_at = self.run_started_at
-        self._update_live_run_metrics()
-        self.start_btn.configure(state="disabled")
-        self.validate_btn.configure(state="disabled")
-        self.stop_btn.configure(state="normal")
-        self._set_status(self.tr("status.translation.running", "Translation in progress..."), "running")
-        self.root.after(1000, self._tick_activity)
+        self._prepare_run_start(run_step, redacted)
 
         def runner() -> None:
             runner_db: Optional[ProjectDB] = None
             try:
                 runner_db = ProjectDB(SQLITE_FILE)
-                env = {**os.environ, "PYTHONUNBUFFERED": "1"}
-                if provider == "google":
-                    if google_api_key:
-                        env[GOOGLE_API_KEY_ENV] = google_api_key
+                env = self._build_runtime_env(provider, google_api_key)
                 self.proc = subprocess.Popen(
                     cmd,
                     cwd=str(self.workdir),
@@ -4236,142 +4367,19 @@ class TranslatorGUI:
                     self.log_queue.put(line)
 
                 code = self.proc.wait()
-                if code == 0 and bool(self.hard_gate_epubcheck_var.get()):
-                    self.log_queue.put("[EPUBCHECK-GATE] Running epubcheck...\n")
-                    gate_ok, gate_msg = self._run_epubcheck_gate(Path(self.output_epub_var.get().strip()))
-                    self.log_queue.put(gate_msg + "\n")
-                    if not gate_ok:
-                        self.log_queue.put("\n=== EPUBCHECK GATE BLOCKED ===\n")
-                        code = 86
-                if code == 0 and self.current_project_id is not None and runner_db is not None:
-                    qa_sev_ok, qa_sev_msg = runner_db.qa_severity_gate_status(
-                        self.current_project_id,
-                        run_step,
-                        severities=("fatal", "error"),
-                    )
-                    self.log_queue.put(f"[QA-SEVERITY-GATE] {qa_sev_msg}\n")
-                    if not qa_sev_ok:
-                        self.log_queue.put("\n=== QA SEVERITY GATE BLOCKED ===\n")
-                        code = 87
+                code = self._apply_run_finish_gates(code, runner_db, run_step)
                 if code == 0:
-                    self.log_queue.put("\n=== " + self.tr("log.run_ok", "RUN OK") + " ===\n")
-                    self.root.after(0, lambda: self._set_status(self.tr("status.done", "Finished"), "ok"))
-                    self.root.after(0, lambda: self.phase_var.set(self.tr("status.phase.done", "Phase: finished")))
-                    self.root.after(0, lambda: self.progress_value_var.set(100.0 if self.progress_value_var.get() > 0 else self.progress_value_var.get()))
-                    metrics_blob = self._runtime_metrics_blob()
-                    if self.current_project_id is not None and run_step == "translate":
-                        edit_cfg = self.step_values.get("edit", {})
-                        gate_ok, gate_msg = runner_db.qa_gate_status(self.current_project_id, step="translate") if runner_db else (True, "")
-                        if not gate_ok:
-                            if runner_db:
-                                runner_db.update_project(self.current_project_id, {"status": "needs_review"})
-                            self.log_queue.put(f"[QA-GATE] {self.tr('log.qa_gate_blocked', 'Auto transition to edit blocked.')}" + f" {gate_msg}\n")
-                        elif (edit_cfg.get("output", "") or "").strip() and (edit_cfg.get("prompt", "") or "").strip():
-                            if runner_db:
-                                runner_db.mark_project_pending(self.current_project_id, "edit")
-                                runner_db.update_project(self.current_project_id, {"status": "pending"})
-                    if self.current_run_id is not None:
-                        if runner_db:
-                            runner_db.finish_run(
-                                self.current_run_id,
-                                status="ok",
-                                message=f"Run finished | {metrics_blob}",
-                                global_done=self.global_done,
-                                global_total=self.global_total,
-                            )
-                    if runner_db and self.current_project_id is not None and run_step in {"translate", "edit"}:
-                        try:
-                            self._sync_series_terms_after_run(runner_db, self.current_project_id)
-                        except Exception as e:
-                            self.log_queue.put(f"[SERIES] PominiÄ™to sync sĹ‚ownika serii: {e}\n")
-                    log_event_jsonl(
-                        self.events_log_path,
-                        "run_finish",
-                        {"project_id": self.current_project_id, "status": "ok", "done": self.global_done, "total": self.global_total},
-                    )
-                    if runner_db:
-                        runner_db.log_audit_event("run_finish", {"project_id": self.current_project_id, "status": "ok"})
+                    self._handle_run_success(runner_db, run_step)
                 else:
-                    self.log_queue.put("\n=== " + self.tr("log.run_error_exit", "RUN ERROR (exit={code})", code=code) + " ===\n")
-                    self.root.after(0, lambda: self._set_status(self.tr("status.process_error", "Process error"), "error"))
-                    self.root.after(0, lambda: self.phase_var.set(self.tr("status.phase.error", "Phase: error")))
-                    metrics_blob = self._runtime_metrics_blob()
-                    if self.current_run_id is not None:
-                        if runner_db:
-                            runner_db.finish_run(
-                                self.current_run_id,
-                                status="error",
-                                message=f"exit={code} | {metrics_blob}",
-                                global_done=self.global_done,
-                                global_total=self.global_total,
-                            )
-                    log_event_jsonl(
-                        self.events_log_path,
-                        "run_finish",
-                        {"project_id": self.current_project_id, "status": "error", "done": self.global_done, "total": self.global_total},
-                    )
-                    if runner_db:
-                        runner_db.log_audit_event("run_finish", {"project_id": self.current_project_id, "status": "error"})
+                    self._handle_run_failure(runner_db, code)
             except Exception as e:
-                self.log_queue.put(f"\n{self.tr('log.start_error', 'Startup error')}: {e}\n")
-                self.root.after(0, lambda: self._set_status(self.tr("status.start_error", "Startup error"), "error"))
-                self.root.after(0, lambda: self.phase_var.set(self.tr("status.phase.start_error", "Phase: startup error")))
-                metrics_blob = self._runtime_metrics_blob()
-                if self.current_run_id is not None:
-                    if runner_db:
-                        runner_db.finish_run(
-                            self.current_run_id,
-                            status="error",
-                            message=f"{e} | {metrics_blob}",
-                            global_done=self.global_done,
-                            global_total=self.global_total,
-                        )
-                log_event_jsonl(
-                    self.events_log_path,
-                    "run_finish",
-                    {"project_id": self.current_project_id, "status": "exception", "error": str(e)},
-                )
-                if runner_db:
-                    runner_db.log_audit_event("run_finish", {"project_id": self.current_project_id, "status": "exception"})
+                self._handle_run_exception(runner_db, e)
             finally:
-                if runner_db is not None:
-                    runner_db.close()
-                self.current_run_id = None
-                self.proc = None
-                self.run_started_at = None
-                self.last_log_at = None
-                self.root.after(0, self._refresh_projects)
-                self.root.after(0, self._refresh_run_history)
-                self.root.after(0, self._refresh_ledger_status)
-                self.root.after(0, lambda: self.start_btn.configure(state="normal"))
-                self.root.after(0, lambda: self.validate_btn.configure(state="normal"))
-                self.root.after(0, lambda: self.stop_btn.configure(state="disabled"))
-                if self.run_all_active:
-                    self.root.after(200, self._continue_run_all)
-                elif self.series_batch_context is not None and bool(self.series_batch_context.get("stopped")):
-                    self.root.after(200, lambda: self._finalize_series_batch("stopped"))
+                self._finalize_run_thread(runner_db)
 
         threading.Thread(target=runner, daemon=True).start()
 
-    def _start_validation(self) -> None:
-        if self.proc is not None:
-            self._msg_info(self.tr("info.process_running", "Process is already running."))
-            return
-
-        out_file = Path(self.output_epub_var.get().strip()) if self.output_epub_var.get().strip() else None
-        in_file = Path(self.input_epub_var.get().strip()) if self.input_epub_var.get().strip() else None
-        target: Optional[Path] = None
-
-        if out_file and out_file.exists():
-            target = out_file
-        elif in_file and in_file.exists():
-            target = in_file
-
-        if target is None:
-            self._msg_error(self.tr("err.validation_no_epub", "No EPUB for validation (output or input)."))
-            return
-
-        cmd = self._build_validation_command(str(target))
+    def _prepare_validation_start(self, cmd: List[str], target: Path) -> None:
         self._append_log("\n=== START WALIDACJI ===\n")
         self._append_log("Komenda: " + " ".join(quote_arg(x) for x in cmd) + "\n\n")
         log_event_jsonl(self.events_log_path, "validation_start", {"project_id": self.current_project_id, "target": str(target)})
@@ -4396,6 +4404,84 @@ class TranslatorGUI:
         self._set_status(self.tr("status.validation.running", "Validation in progress..."), "running")
         self.root.after(1000, self._tick_activity)
 
+    def _handle_validation_success(self, runner_db: Optional[ProjectDB]) -> None:
+        self.log_queue.put("\n=== " + self.tr("log.validation_ok", "VALIDATION OK") + " ===\n")
+        self.root.after(0, lambda: self._set_status(self.tr("status.validation.ok", "Validation OK"), "ok"))
+        self.root.after(0, lambda: self.phase_var.set(self.tr("status.phase.validation_done", "Phase: validation complete")))
+        metrics_blob = self._runtime_metrics_blob()
+        if self.current_run_id is not None and runner_db:
+            runner_db.finish_run(self.current_run_id, status="ok", message=f"Validation OK | {metrics_blob}")
+        log_event_jsonl(self.events_log_path, "validation_finish", {"project_id": self.current_project_id, "status": "ok"})
+        if runner_db:
+            runner_db.log_audit_event("validation_finish", {"project_id": self.current_project_id, "status": "ok"})
+
+    def _handle_validation_failure(self, runner_db: Optional[ProjectDB], exit_code: int) -> None:
+        self.log_queue.put("\n=== " + self.tr("log.validation_fail_exit", "VALIDATION FAILED (exit={code})", code=exit_code) + " ===\n")
+        self.root.after(0, lambda: self._set_status(self.tr("status.validation.error", "Validation error"), "error"))
+        self.root.after(
+            0,
+            lambda: self.phase_var.set(self.tr("status.phase.validation_error_done", "Phase: validation finished with errors")),
+        )
+        metrics_blob = self._runtime_metrics_blob()
+        if self.current_run_id is not None and runner_db:
+            runner_db.finish_run(self.current_run_id, status="error", message=f"Validation exit={exit_code} | {metrics_blob}")
+        log_event_jsonl(
+            self.events_log_path,
+            "validation_finish",
+            {"project_id": self.current_project_id, "status": "error", "exit": exit_code},
+        )
+        if runner_db:
+            runner_db.log_audit_event("validation_finish", {"project_id": self.current_project_id, "status": "error"})
+
+    def _handle_validation_exception(self, runner_db: Optional[ProjectDB], err: Exception) -> None:
+        self.log_queue.put(f"\n{self.tr('log.validation_start_error', 'Validation startup error')}: {err}\n")
+        self.root.after(0, lambda: self._set_status(self.tr("status.start_error", "Startup error"), "error"))
+        metrics_blob = self._runtime_metrics_blob()
+        if self.current_run_id is not None and runner_db:
+            runner_db.finish_run(self.current_run_id, status="error", message=f"{err} | {metrics_blob}")
+        log_event_jsonl(
+            self.events_log_path,
+            "validation_finish",
+            {"project_id": self.current_project_id, "status": "exception", "error": str(err)},
+        )
+        if runner_db:
+            runner_db.log_audit_event("validation_finish", {"project_id": self.current_project_id, "status": "exception"})
+
+    def _finalize_validation_thread(self, runner_db: Optional[ProjectDB]) -> None:
+        if runner_db is not None:
+            runner_db.close()
+        self.current_run_id = None
+        self.proc = None
+        self.run_started_at = None
+        self.last_log_at = None
+        self.root.after(0, self._refresh_projects)
+        self.root.after(0, self._refresh_run_history)
+        self.root.after(0, self._refresh_ledger_status)
+        self.root.after(0, lambda: self.start_btn.configure(state="normal"))
+        self.root.after(0, lambda: self.validate_btn.configure(state="normal"))
+        self.root.after(0, lambda: self.stop_btn.configure(state="disabled"))
+
+    def _start_validation(self) -> None:
+        if self.proc is not None:
+            self._msg_info(self.tr("info.process_running", "Process is already running."))
+            return
+
+        out_file = Path(self.output_epub_var.get().strip()) if self.output_epub_var.get().strip() else None
+        in_file = Path(self.input_epub_var.get().strip()) if self.input_epub_var.get().strip() else None
+        target: Optional[Path] = None
+
+        if out_file and out_file.exists():
+            target = out_file
+        elif in_file and in_file.exists():
+            target = in_file
+
+        if target is None:
+            self._msg_error(self.tr("err.validation_no_epub", "No EPUB for validation (output or input)."))
+            return
+
+        cmd = self._build_validation_command(str(target))
+        self._prepare_validation_start(cmd, target)
+
         def runner() -> None:
             runner_db: Optional[ProjectDB] = None
             try:
@@ -4418,50 +4504,13 @@ class TranslatorGUI:
 
                 code = self.proc.wait()
                 if code == 0:
-                    self.log_queue.put("\n=== " + self.tr("log.validation_ok", "VALIDATION OK") + " ===\n")
-                    self.root.after(0, lambda: self._set_status(self.tr("status.validation.ok", "Validation OK"), "ok"))
-                    self.root.after(0, lambda: self.phase_var.set(self.tr("status.phase.validation_done", "Phase: validation complete")))
-                    metrics_blob = self._runtime_metrics_blob()
-                    if self.current_run_id is not None:
-                        if runner_db:
-                            runner_db.finish_run(self.current_run_id, status="ok", message=f"Validation OK | {metrics_blob}")
-                    log_event_jsonl(self.events_log_path, "validation_finish", {"project_id": self.current_project_id, "status": "ok"})
-                    if runner_db:
-                        runner_db.log_audit_event("validation_finish", {"project_id": self.current_project_id, "status": "ok"})
+                    self._handle_validation_success(runner_db)
                 else:
-                    self.log_queue.put("\n=== " + self.tr("log.validation_fail_exit", "VALIDATION FAILED (exit={code})", code=code) + " ===\n")
-                    self.root.after(0, lambda: self._set_status(self.tr("status.validation.error", "Validation error"), "error"))
-                    self.root.after(0, lambda: self.phase_var.set(self.tr("status.phase.validation_error_done", "Phase: validation finished with errors")))
-                    metrics_blob = self._runtime_metrics_blob()
-                    if self.current_run_id is not None:
-                        if runner_db:
-                            runner_db.finish_run(self.current_run_id, status="error", message=f"Validation exit={code} | {metrics_blob}")
-                    log_event_jsonl(self.events_log_path, "validation_finish", {"project_id": self.current_project_id, "status": "error", "exit": code})
-                    if runner_db:
-                        runner_db.log_audit_event("validation_finish", {"project_id": self.current_project_id, "status": "error"})
+                    self._handle_validation_failure(runner_db, code)
             except Exception as e:
-                self.log_queue.put(f"\n{self.tr('log.validation_start_error', 'Validation startup error')}: {e}\n")
-                self.root.after(0, lambda: self._set_status(self.tr("status.start_error", "Startup error"), "error"))
-                metrics_blob = self._runtime_metrics_blob()
-                if self.current_run_id is not None:
-                    if runner_db:
-                        runner_db.finish_run(self.current_run_id, status="error", message=f"{e} | {metrics_blob}")
-                log_event_jsonl(self.events_log_path, "validation_finish", {"project_id": self.current_project_id, "status": "exception", "error": str(e)})
-                if runner_db:
-                    runner_db.log_audit_event("validation_finish", {"project_id": self.current_project_id, "status": "exception"})
+                self._handle_validation_exception(runner_db, e)
             finally:
-                if runner_db is not None:
-                    runner_db.close()
-                self.current_run_id = None
-                self.proc = None
-                self.run_started_at = None
-                self.last_log_at = None
-                self.root.after(0, self._refresh_projects)
-                self.root.after(0, self._refresh_run_history)
-                self.root.after(0, self._refresh_ledger_status)
-                self.root.after(0, lambda: self.start_btn.configure(state="normal"))
-                self.root.after(0, lambda: self.validate_btn.configure(state="normal"))
-                self.root.after(0, lambda: self.stop_btn.configure(state="disabled"))
+                self._finalize_validation_thread(runner_db)
 
         threading.Thread(target=runner, daemon=True).start()
 
