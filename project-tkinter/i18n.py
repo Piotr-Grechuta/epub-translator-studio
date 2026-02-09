@@ -31,6 +31,7 @@ SUPPORTED_TEXT_LANGS: Dict[str, str] = {
     "fr": "French",
     "es": "Spanish",
     "pt": "Portuguese",
+    "ro": "Romanian",
 }
 
 

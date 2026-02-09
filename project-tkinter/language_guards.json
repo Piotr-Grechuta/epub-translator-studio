@@ -1,0 +1,19 @@
+{
+  "ro": {
+    "special_chars": "ăâîșşțţ",
+    "hint_words": [
+      "si",
+      "este",
+      "nu",
+      "un",
+      "o",
+      "cu",
+      "pentru",
+      "care",
+      "din",
+      "la",
+      "pe",
+      "sau"
+    ]
+  }
+}
