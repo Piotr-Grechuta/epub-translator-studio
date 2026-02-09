@@ -4652,12 +4652,7 @@ class TranslatorGUI:
         data.pop("google_api_key", None)
         return data
 
-    def _apply_settings(self, data: dict) -> None:
-        if isinstance(data, dict):
-            legacy_key = str(data.get("google_api_key", "")).strip()
-            if legacy_key:
-                self.google_api_key_var.set(legacy_key)
-                save_google_api_key_to_keyring(legacy_key)
+    def _apply_settings_values(self, data: dict) -> None:
         self.mode_var.set(data.get("mode", self.mode_var.get()))
         self.provider_var.set(data.get("provider", self.provider_var.get()))
         self.input_epub_var.set(data.get("input_epub", self.input_epub_var.get()))
@@ -4696,6 +4691,8 @@ class TranslatorGUI:
         self.source_lang_var.set(str(data.get("source_lang", self.source_lang_var.get() or "en")))
         self.target_lang_var.set(str(data.get("target_lang", self.target_lang_var.get() or "pl")))
         self.ui_language_var.set(str(data.get("ui_language", self.ui_language_var.get() or self.i18n.lang)))
+
+    def _apply_settings_side_effects(self) -> None:
         self._on_tooltip_mode_change()
         if self.ui_language_var.get().strip().lower() != self.i18n.lang:
             self._on_ui_language_change()
@@ -4703,6 +4700,15 @@ class TranslatorGUI:
         self._refresh_prompt_preset_options()
         self._refresh_ledger_status()
         self._update_command_preview()
+
+    def _apply_settings(self, data: dict) -> None:
+        if isinstance(data, dict):
+            legacy_key = str(data.get("google_api_key", "")).strip()
+            if legacy_key:
+                self.google_api_key_var.set(legacy_key)
+                save_google_api_key_to_keyring(legacy_key)
+        self._apply_settings_values(data)
+        self._apply_settings_side_effects()
 
     def _save_settings(self, silent: bool = False) -> None:
         try:
