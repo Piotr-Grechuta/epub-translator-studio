@@ -3615,6 +3615,94 @@ class TranslatorGUI:
             return "SKIP"
         return "FAIL"
 
+    def _health_timeout_seconds(self) -> int:
+        try:
+            return max(6, min(30, int(float(self.timeout_var.get().strip() or "20"))))
+        except Exception:
+            return 20
+
+    def _build_health_payload(self, status_map: Dict[str, Any]) -> Tuple[str, List[str], List[Dict[str, Any]]]:
+        lines: List[str] = []
+        details: List[str] = []
+        payload_rows: List[Dict[str, Any]] = []
+        for key in ("ollama", "google"):
+            st = status_map.get(key)
+            if st is None:
+                continue
+            badge = self._health_state_badge(getattr(st, "state", "fail"))
+            latency = int(getattr(st, "latency_ms", 0) or 0)
+            model_count = int(getattr(st, "model_count", 0) or 0)
+            lines.append(f"{key.upper()}={badge} {latency}ms m={model_count}")
+            detail = str(getattr(st, "detail", "") or "").strip()
+            if detail and badge != "OK":
+                details.append(f"{key}: {detail}")
+            payload_rows.append(
+                {
+                    "provider": str(getattr(st, "provider", key) or key).strip().lower(),
+                    "state": str(getattr(st, "state", "fail") or "fail").strip().lower(),
+                    "latency_ms": latency,
+                    "model_count": model_count,
+                    "detail": detail,
+                }
+            )
+        summary = " | ".join(lines) if lines else "Brak danych health check."
+        return summary, details, payload_rows
+
+    def _build_health_trend(self, payload_rows: List[Dict[str, Any]], details: List[str]) -> Tuple[str, List[str], List[str]]:
+        trend_lines: List[str] = []
+        alerts: List[str] = []
+        if payload_rows:
+            health_db: Optional[ProjectDB] = None
+            try:
+                health_db = ProjectDB(SQLITE_FILE)
+                health_db.record_provider_health_checks(payload_rows)
+                for row in payload_rows:
+                    provider_key = str(row.get("provider", "")).strip().lower()
+                    if not provider_key:
+                        continue
+                    snap = health_db.provider_health_summary(provider_key, window=20)
+                    total = int(snap.get("total", 0) or 0)
+                    fail_streak = int(snap.get("failure_streak", 0) or 0)
+                    avg_latency = int(snap.get("avg_latency_ms", 0) or 0)
+                    latest = str(snap.get("latest_state", "n/a") or "n/a").upper()
+                    trend_lines.append(f"{provider_key.upper()}: latest={latest} streak={fail_streak} avg={avg_latency}ms n={total}")
+                    if fail_streak >= 3:
+                        alerts.append(f"{provider_key.upper()} failure streak={fail_streak} (window=20)")
+            except Exception as e:
+                details.append(f"health telemetry persist failed: {e}")
+            finally:
+                if health_db is not None:
+                    try:
+                        health_db.close()
+                    except Exception:
+                        pass
+        trend_summary = " | ".join(trend_lines) if trend_lines else self.tr("status.health_trend.none", "Health trend: brak danych")
+        return trend_summary, trend_lines, alerts
+
+    def _apply_health_summary(
+        self,
+        summary: str,
+        trend_summary: str,
+        trend_lines: List[str],
+        details: List[str],
+        alerts: List[str],
+    ) -> None:
+        self.model_status.configure(text=summary)
+        self.health_trend_var.set(trend_summary)
+        self.log_queue.put(f"[HEALTH] {summary}\n")
+        if trend_lines:
+            self.log_queue.put(f"[HEALTH] trend: {trend_summary}\n")
+        for item in details:
+            self.log_queue.put(f"[HEALTH] {item}\n")
+        if alerts:
+            for item in alerts:
+                self.log_queue.put(f"[HEALTH][ALERT] {item}\n")
+            self._set_inline_notice(
+                "Health alert: wykryto serie nieudanych probe providera.",
+                level="warn",
+                timeout_ms=9000,
+            )
+
     def _health_check_providers(self) -> None:
         self.model_status.configure(text="Sprawdzam provider health (async I/O)...")
         self.health_trend_var.set(self.tr("status.health_trend.pending", "Health trend: odswiezanie..."))
@@ -3622,10 +3710,7 @@ class TranslatorGUI:
         google_key = self._google_api_key()
 
         def worker() -> None:
-            try:
-                timeout_s = max(6, min(30, int(float(self.timeout_var.get().strip() or "20"))))
-            except Exception:
-                timeout_s = 20
+            timeout_s = self._health_timeout_seconds()
             try:
                 status_map = gather_provider_health(
                     ollama_host=ollama_host,
@@ -3639,77 +3724,12 @@ class TranslatorGUI:
                 self.root.after(0, lambda msg=err: self.model_status.configure(text=f"Health check fail: {msg}"))
                 return
 
-            lines: List[str] = []
-            details: List[str] = []
-            payload_rows: List[Dict[str, Any]] = []
-            for key in ("ollama", "google"):
-                st = status_map.get(key)
-                if st is None:
-                    continue
-                badge = self._health_state_badge(getattr(st, "state", "fail"))
-                latency = int(getattr(st, "latency_ms", 0) or 0)
-                model_count = int(getattr(st, "model_count", 0) or 0)
-                lines.append(f"{key.upper()}={badge} {latency}ms m={model_count}")
-                detail = str(getattr(st, "detail", "") or "").strip()
-                if detail and badge != "OK":
-                    details.append(f"{key}: {detail}")
-                payload_rows.append(
-                    {
-                        "provider": str(getattr(st, "provider", key) or key).strip().lower(),
-                        "state": str(getattr(st, "state", "fail") or "fail").strip().lower(),
-                        "latency_ms": latency,
-                        "model_count": model_count,
-                        "detail": detail,
-                    }
-                )
-            summary = " | ".join(lines) if lines else "Brak danych health check."
-            trend_lines: List[str] = []
-            alerts: List[str] = []
-            if payload_rows:
-                health_db: Optional[ProjectDB] = None
-                try:
-                    health_db = ProjectDB(SQLITE_FILE)
-                    health_db.record_provider_health_checks(payload_rows)
-                    for row in payload_rows:
-                        provider_key = str(row.get("provider", "")).strip().lower()
-                        if not provider_key:
-                            continue
-                        snap = health_db.provider_health_summary(provider_key, window=20)
-                        total = int(snap.get("total", 0) or 0)
-                        fail_streak = int(snap.get("failure_streak", 0) or 0)
-                        avg_latency = int(snap.get("avg_latency_ms", 0) or 0)
-                        latest = str(snap.get("latest_state", "n/a") or "n/a").upper()
-                        trend_lines.append(f"{provider_key.upper()}: latest={latest} streak={fail_streak} avg={avg_latency}ms n={total}")
-                        if fail_streak >= 3:
-                            alerts.append(f"{provider_key.upper()} failure streak={fail_streak} (window=20)")
-                except Exception as e:
-                    details.append(f"health telemetry persist failed: {e}")
-                finally:
-                    if health_db is not None:
-                        try:
-                            health_db.close()
-                        except Exception:
-                            pass
-            trend_summary = " | ".join(trend_lines) if trend_lines else self.tr("status.health_trend.none", "Health trend: brak danych")
-
-            def apply_summary() -> None:
-                self.model_status.configure(text=summary)
-                self.health_trend_var.set(trend_summary)
-                self.log_queue.put(f"[HEALTH] {summary}\n")
-                if trend_lines:
-                    self.log_queue.put(f"[HEALTH] trend: {trend_summary}\n")
-                for item in details:
-                    self.log_queue.put(f"[HEALTH] {item}\n")
-                if alerts:
-                    for item in alerts:
-                        self.log_queue.put(f"[HEALTH][ALERT] {item}\n")
-                    self._set_inline_notice(
-                        "Health alert: wykryto serie nieudanych probe providera.",
-                        level="warn",
-                        timeout_ms=9000,
-                    )
-
-            self.root.after(0, apply_summary)
+            summary, details, payload_rows = self._build_health_payload(status_map)
+            trend_summary, trend_lines, alerts = self._build_health_trend(payload_rows, details)
+            self.root.after(
+                0,
+                lambda: self._apply_health_summary(summary, trend_summary, trend_lines, details, alerts),
+            )
 
         threading.Thread(target=worker, daemon=True).start()
 
