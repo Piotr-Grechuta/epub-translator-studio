@@ -49,11 +49,11 @@ DEFAULT_BLOCK_TAGS = (
 )
 
 EXCLUDED_ANCESTORS = ("head", "script", "style", "svg", "math")
-POLISH_CHARS = set("Ä…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽ")
+POLISH_CHARS = set("\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017a\u017c")
 POLISH_HINT_WORDS = {
-    "i", "oraz", "ĹĽe", "siÄ™", "jest", "nie", "na", "do", "z", "za", "dla", "ktĂłry",
-    "ktĂłra", "ktĂłre", "jako", "aby", "czy", "to", "ten", "ta", "te", "po", "przez",
-    "w", "przy", "od", "pod", "nad", "bez", "juĹĽ", "wiÄ™c", "gdy", "gdyĹĽ",
+    "i", "oraz", "\u017ce", "si\u0119", "jest", "nie", "na", "do", "z", "za", "dla", "kt\u00f3ry",
+    "kt\u00f3ra", "kt\u00f3re", "jako", "aby", "czy", "to", "ten", "ta", "te", "po", "przez",
+    "w", "przy", "od", "pod", "nad", "bez", "ju\u017c", "wi\u0119c", "gdy", "gdy\u017c",
 }
 ENGLISH_HINT_WORDS = {
     "the", "and", "of", "to", "in", "for", "with", "on", "that", "this", "is", "are",
@@ -62,27 +62,27 @@ ENGLISH_HINT_WORDS = {
 LANGUAGE_GUARD_DEFAULTS: Dict[str, Dict[str, object]] = {
     "en": {"special_chars": "", "hint_words": sorted(ENGLISH_HINT_WORDS)},
     "pl": {
-        "special_chars": "Ä…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽ",
+        "special_chars": "\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017a\u017c",
         "hint_words": sorted(POLISH_HINT_WORDS),
     },
     "de": {
-        "special_chars": "Ă¤Ă¶ĂĽĂź",
+        "special_chars": "\u00e4\u00f6\u00fc\u00df",
         "hint_words": ["der", "die", "das", "und", "ist", "nicht", "ein", "eine", "mit", "zu", "auf"],
     },
     "fr": {
-        "special_chars": "Ă Ă˘Ă§Ă©Ă¨ĂŞĂ«Ă®ĂŻĂ´ĂąĂ»ĂĽĂżĹ“",
+        "special_chars": "\u00e0\u00e2\u00e7\u00e9\u00e8\u00ea\u00eb\u00ee\u00ef\u00f4\u00fb\u00f9\u00ff\u0153",
         "hint_words": ["le", "la", "les", "et", "est", "pas", "une", "un", "avec", "dans", "pour"],
     },
     "es": {
-        "special_chars": "ĂˇĂ©Ă­ĂłĂşĂ±ĂĽ",
+        "special_chars": "\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc",
         "hint_words": ["el", "la", "los", "las", "y", "es", "no", "una", "un", "con", "para"],
     },
     "pt": {
-        "special_chars": "ĂˇĂ˘ĂŁĂ Ă§Ă©ĂŞĂ­ĂłĂ´ĂµĂş",
+        "special_chars": "\u00e1\u00e2\u00e3\u00e0\u00e7\u00e9\u00ea\u00ed\u00f3\u00f4\u00f5\u00fa",
         "hint_words": ["o", "a", "os", "as", "e", "nao", "uma", "um", "com", "para", "que"],
     },
     "ro": {
-        "special_chars": "ÄĂ˘Ă®Č™ĹźČ›ĹŁ",
+        "special_chars": "\u0103\u00e2\u00ee\u0219\u021b\u015f\u0163",
         "hint_words": ["si", "este", "nu", "un", "o", "cu", "pentru", "care", "din", "la", "pe"],
     },
 }
@@ -137,7 +137,7 @@ class Cache:
                         if isinstance(sid, str) and isinstance(tr, str):
                             self.data[sid] = tr
                             p = _cache_prefix(sid)
-                            if p and p not in self.prefix_map:
+                            if p:
                                 self.prefix_map[p] = tr
                     except Exception:
                         continue
@@ -162,7 +162,7 @@ class Cache:
     def __setitem__(self, seg_id: str, translation: str) -> None:
         self.data[seg_id] = translation
         p = _cache_prefix(seg_id)
-        if p and p not in self.prefix_map:
+        if p:
             self.prefix_map[p] = translation
 
     def append(self, seg_id: str, translation: str) -> None:
