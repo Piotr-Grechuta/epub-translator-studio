@@ -4,17 +4,19 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Set
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import requests
 
 GOOGLE_API_KEY_ENV = "GOOGLE_API_KEY"
 OLLAMA_HOST_DEFAULT = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 DEFAULT_SUPPORTED_TEXT_LANGS: Set[str] = {"en", "pl", "de", "fr", "es", "pt", "ro"}
+ALLOWED_RUN_STEPS: Set[str] = {"translate", "edit"}
 
 
 @dataclass
@@ -50,6 +52,7 @@ class RunOptions:
     context_neighbor_max_chars: str = "180"
     context_segment_max_chars: str = "1200"
     io_concurrency: str = "1"
+    language_guard_config: str = ""
 
 
 @dataclass
@@ -209,6 +212,26 @@ def gather_provider_health(
     )
 
 
+def _parse_int(raw: str, field_name: str) -> Tuple[Optional[int], Optional[str]]:
+    value_raw = str(raw or "").strip()
+    if not value_raw:
+        return None, f"{field_name} is required"
+    try:
+        return int(value_raw), None
+    except Exception:
+        return None, f"{field_name} must be an integer"
+
+
+def _parse_float(raw: str, field_name: str) -> Tuple[Optional[float], Optional[str]]:
+    value_raw = str(raw or "").strip().replace(",", ".")
+    if not value_raw:
+        return None, f"{field_name} is required"
+    try:
+        return float(value_raw), None
+    except Exception:
+        return None, f"{field_name} must be a number"
+
+
 def validate_run_options(
     opts: RunOptions,
     *,
@@ -218,6 +241,9 @@ def validate_run_options(
     langs = supported_text_langs or DEFAULT_SUPPORTED_TEXT_LANGS
     if opts.provider not in {"ollama", "google"}:
         return "provider must be 'ollama' or 'google'"
+    run_step = str(opts.run_step or "").strip().lower() or "translate"
+    if run_step not in ALLOWED_RUN_STEPS:
+        return "run_step must be 'translate' or 'edit'"
     if not opts.input_epub.strip():
         return "input_epub is required"
     if not Path(opts.input_epub.strip()).exists():
@@ -236,6 +262,66 @@ def validate_run_options(
         return "invalid target_lang"
     if opts.provider == "google" and not (google_api_key or "").strip():
         return f"google api key missing ({GOOGLE_API_KEY_ENV})"
+    int_min_rules = [
+        ("batch_max_segs", opts.batch_max_segs, 1),
+        ("batch_max_chars", opts.batch_max_chars, 1),
+        ("timeout", opts.timeout, 1),
+        ("attempts", opts.attempts, 1),
+        ("checkpoint", opts.checkpoint, 0),
+        ("num_ctx", opts.num_ctx, 1),
+        ("num_predict", opts.num_predict, 1),
+        ("io_concurrency", opts.io_concurrency, 1),
+        ("context_window", opts.context_window, 0),
+        ("context_neighbor_max_chars", opts.context_neighbor_max_chars, 24),
+        ("context_segment_max_chars", opts.context_segment_max_chars, 80),
+    ]
+    for field_name, raw_value, min_value in int_min_rules:
+        parsed, err = _parse_int(raw_value, field_name)
+        if err:
+            return err
+        assert parsed is not None
+        if parsed < min_value:
+            return f"{field_name} must be >= {min_value}"
+
+    sleep_v, sleep_err = _parse_float(opts.sleep, "sleep")
+    if sleep_err:
+        return sleep_err
+    assert sleep_v is not None
+    if sleep_v < 0:
+        return "sleep must be >= 0"
+
+    temp_v, temp_err = _parse_float(opts.temperature, "temperature")
+    if temp_err:
+        return temp_err
+    assert temp_v is not None
+    if temp_v < 0:
+        return "temperature must be >= 0"
+
+    backoff = str(opts.backoff or "").strip()
+    if not backoff:
+        return "backoff is required"
+    parts = [p.strip() for p in backoff.split(",") if p.strip()]
+    if not parts:
+        return "backoff must contain at least one value"
+    for idx, part in enumerate(parts, start=1):
+        val, err = _parse_float(part, f"backoff[{idx}]")
+        if err:
+            return err
+        assert val is not None
+        if val <= 0:
+            return f"backoff[{idx}] must be > 0"
+
+    guard_config = str(opts.language_guard_config or "").strip()
+    if guard_config:
+        cfg_path = Path(guard_config)
+        if not cfg_path.exists():
+            return f"language guard config does not exist: {cfg_path}"
+        try:
+            parsed_cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        except Exception:
+            return f"language guard config is not valid JSON: {cfg_path}"
+        if not isinstance(parsed_cfg, dict):
+            return "language guard config root must be an object"
     return None
 
 
@@ -297,6 +383,9 @@ def build_run_command(
         cmd += ["--tm-project-id", str(int(opts.tm_project_id))]
     cmd += ["--run-step", (opts.run_step.strip().lower() or "translate")]
     cmd += ["--tm-fuzzy-threshold", tm_fuzzy_threshold]
+    guard_cfg = str(opts.language_guard_config or "").strip()
+    if guard_cfg:
+        cmd += ["--language-guard-config", guard_cfg]
     try:
         io_concurrency = max(1, int(str(opts.io_concurrency or "").strip() or "1"))
     except Exception:

@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from runtime_core import RunOptions, build_run_command  # noqa: E402
+from runtime_core import RunOptions, build_run_command, validate_run_options  # noqa: E402
 from app_gui_classic import parse_epubcheck_findings  # noqa: E402
 from project_db import ProjectDB  # noqa: E402
 from text_preserve import set_text_preserving_inline, tokenize_inline_markup, apply_tokenized_inline_markup  # noqa: E402
@@ -387,6 +387,112 @@ def test_build_run_command_includes_run_step() -> None:
     assert "--context-segment-max-chars" in cmd
     assert "--io-concurrency" in cmd
     assert cmd[cmd.index("--io-concurrency") + 1] == "3"
+
+
+def test_build_run_command_includes_language_guard_config(tmp_path: Path) -> None:
+    in_epub = tmp_path / "in.epub"
+    out_epub = tmp_path / "out.epub"
+    prompt = tmp_path / "prompt.txt"
+    guard_cfg = tmp_path / "guards.json"
+    in_epub.write_text("x", encoding="utf-8")
+    prompt.write_text("prompt", encoding="utf-8")
+    guard_cfg.write_text('{"ro":{"special_chars":"abc","hint_words":["si"]}}', encoding="utf-8")
+    opts = RunOptions(
+        provider="ollama",
+        input_epub=str(in_epub),
+        output_epub=str(out_epub),
+        prompt=str(prompt),
+        model="llama3.1:8b",
+        batch_max_segs="6",
+        batch_max_chars="12000",
+        sleep="0",
+        timeout="300",
+        attempts="3",
+        backoff="5,15,30",
+        temperature="0.1",
+        num_ctx="8192",
+        num_predict="2048",
+        tags="p,li",
+        checkpoint="0",
+        debug_dir="debug",
+        source_lang="en",
+        target_lang="pl",
+        language_guard_config=str(guard_cfg),
+    )
+    cmd = build_run_command(["python", "-u", "translation_engine.py"], opts)
+    assert "--language-guard-config" in cmd
+    assert cmd[cmd.index("--language-guard-config") + 1] == str(guard_cfg)
+
+
+def test_validate_run_options_rejects_invalid_runtime_contract(tmp_path: Path) -> None:
+    in_epub = tmp_path / "in.epub"
+    prompt = tmp_path / "prompt.txt"
+    in_epub.write_text("x", encoding="utf-8")
+    prompt.write_text("prompt", encoding="utf-8")
+    opts = RunOptions(
+        provider="ollama",
+        input_epub=str(in_epub),
+        output_epub=str(tmp_path / "out.epub"),
+        prompt=str(prompt),
+        model="m",
+        batch_max_segs="0",
+        batch_max_chars="12000",
+        sleep="0",
+        timeout="300",
+        attempts="3",
+        backoff="5,15,30",
+        temperature="0.1",
+        num_ctx="8192",
+        num_predict="2048",
+        tags="p",
+        checkpoint="0",
+        debug_dir="debug",
+        source_lang="en",
+        target_lang="pl",
+        run_step="invalid",
+    )
+    err = validate_run_options(opts)
+    assert err is not None
+    assert "run_step" in err
+
+    opts.run_step = "translate"
+    err2 = validate_run_options(opts)
+    assert err2 is not None
+    assert "batch_max_segs" in err2
+
+
+def test_validate_run_options_rejects_invalid_language_guard_config(tmp_path: Path) -> None:
+    in_epub = tmp_path / "in.epub"
+    prompt = tmp_path / "prompt.txt"
+    cfg = tmp_path / "guards.json"
+    in_epub.write_text("x", encoding="utf-8")
+    prompt.write_text("prompt", encoding="utf-8")
+    cfg.write_text("[1,2,3]", encoding="utf-8")
+    opts = RunOptions(
+        provider="ollama",
+        input_epub=str(in_epub),
+        output_epub=str(tmp_path / "out.epub"),
+        prompt=str(prompt),
+        model="m",
+        batch_max_segs="1",
+        batch_max_chars="12000",
+        sleep="0",
+        timeout="300",
+        attempts="3",
+        backoff="5,15,30",
+        temperature="0.1",
+        num_ctx="8192",
+        num_predict="2048",
+        tags="p",
+        checkpoint="0",
+        debug_dir="debug",
+        source_lang="en",
+        target_lang="pl",
+        language_guard_config=str(cfg),
+    )
+    err = validate_run_options(opts)
+    assert err is not None
+    assert "root must be an object" in err
 
 
 def test_build_context_hints_uses_neighbor_window() -> None:
