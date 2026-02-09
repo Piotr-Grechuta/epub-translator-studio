@@ -3733,28 +3733,31 @@ class TranslatorGUI:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _fetch_provider_models(self, provider: str, ollama_host: str, google_key: str) -> List[str]:
+        if provider == "ollama":
+            models = list_ollama_models(ollama_host)
+        else:
+            if not google_key:
+                raise ValueError(f"Podaj Google API key lub ustaw zmienn?? ??rodowiskow?? {GOOGLE_API_KEY_ENV}.")
+            models = list_google_models(google_key)
+
+        if not models:
+            raise ValueError("Brak modeli do wyboru.")
+        return models
+
     def _refresh_models(self) -> None:
-        self.model_status.configure(text="Pobieram listĂ„â„˘ modeli...")
+        self.model_status.configure(text="Pobieram list?? modeli...")
         provider = self.provider_var.get().strip()
         ollama_host = self.ollama_host_var.get().strip() or OLLAMA_HOST_DEFAULT
         google_key = self._google_api_key() if provider == "google" else ""
 
         def worker() -> None:
             try:
-                if provider == "ollama":
-                    models = list_ollama_models(ollama_host)
-                else:
-                    if not google_key:
-                        raise ValueError(f"Podaj Google API key lub ustaw zmiennĂ„â€¦ Äąâ€şrodowiskowĂ„â€¦ {GOOGLE_API_KEY_ENV}.")
-                    models = list_google_models(google_key)
-
-                if not models:
-                    raise ValueError("Brak modeli do wyboru.")
-
+                models = self._fetch_provider_models(provider, ollama_host, google_key)
                 self.root.after(0, lambda: self._set_models(models))
             except Exception as e:
                 err_text = str(e)
-                self.root.after(0, lambda msg=err_text: self.model_status.configure(text=f"BÄąâ€šĂ„â€¦d: {msg}"))
+                self.root.after(0, lambda msg=err_text: self.model_status.configure(text=f"B????d: {msg}"))
 
         threading.Thread(target=worker, daemon=True).start()
 
