@@ -20,6 +20,8 @@ from translation_engine import (  # noqa: E402
     seed_segment_ledger_from_epub,
     validate_entity_integrity,
     semantic_similarity_score,
+    load_language_guard_profiles,
+    looks_like_target_language,
 )
 
 
@@ -231,6 +233,32 @@ def test_segment_ledger_semantic_findings_replace_previous_open_rows(tmp_path: P
         assert str(sem_rows[0]["segment_id"]) == "sid-3"
     finally:
         db2.close()
+
+
+def test_language_guard_profiles_support_custom_language(tmp_path: Path) -> None:
+    cfg = tmp_path / "guards.json"
+    cfg.write_text(
+        """
+{
+  "ro": {
+    "special_chars": "ăâîșț",
+    "hint_words": ["si", "este", "nu", "un", "o", "cu", "pentru", "care"]
+  }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    profiles = load_language_guard_profiles(cfg)
+    assert "ro" in profiles
+    assert looks_like_target_language("Acesta este un test si merge bine.", "ro", profiles=profiles) is True
+    assert (
+        looks_like_target_language(
+            "This is clearly english text with many words and no romanian markers at all.",
+            "ro",
+            profiles=profiles,
+        )
+        is False
+    )
 
 
 def test_build_run_command_includes_run_step() -> None:

@@ -1,16 +1,16 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """
-TŁUMACZ EPUB: Google vs Ollama — różne mechanizmy optymalizacji per provider
+TĹUMACZ EPUB: Google vs Ollama â€” rĂłĹĽne mechanizmy optymalizacji per provider
 
-Wymagania użytkownika:
-- Podział mechanizmów: osobna polityka pod Google i osobna pod Ollama
-- Google: reaguj na błędy (nie tylko 429) i rób rozsądne fallbacki
-- Ollama: działa lokalnie; host może być stały (starter nie pyta)
-- Postęp GLOBALNY całego projektu (cały EPUB), a nie tylko pliku/segmentu
+Wymagania uĹĽytkownika:
+- PodziaĹ‚ mechanizmĂłw: osobna polityka pod Google i osobna pod Ollama
+- Google: reaguj na bĹ‚Ä™dy (nie tylko 429) i rĂłb rozsÄ…dne fallbacki
+- Ollama: dziaĹ‚a lokalnie; host moĹĽe byÄ‡ staĹ‚y (starter nie pyta)
+- PostÄ™p GLOBALNY caĹ‚ego projektu (caĹ‚y EPUB), a nie tylko pliku/segmentu
 
-Zależności:
+ZaleĹĽnoĹ›ci:
   pip install requests lxml
 """
 
@@ -49,15 +49,42 @@ DEFAULT_BLOCK_TAGS = (
 )
 
 EXCLUDED_ANCESTORS = ("head", "script", "style", "svg", "math")
-POLISH_CHARS = set("ąćęłńóśźż")
+POLISH_CHARS = set("Ä…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽ")
 POLISH_HINT_WORDS = {
-    "i", "oraz", "że", "się", "jest", "nie", "na", "do", "z", "za", "dla", "który",
-    "która", "które", "jako", "aby", "czy", "to", "ten", "ta", "te", "po", "przez",
-    "w", "przy", "od", "pod", "nad", "bez", "już", "więc", "gdy", "gdyż",
+    "i", "oraz", "ĹĽe", "siÄ™", "jest", "nie", "na", "do", "z", "za", "dla", "ktĂłry",
+    "ktĂłra", "ktĂłre", "jako", "aby", "czy", "to", "ten", "ta", "te", "po", "przez",
+    "w", "przy", "od", "pod", "nad", "bez", "juĹĽ", "wiÄ™c", "gdy", "gdyĹĽ",
 }
 ENGLISH_HINT_WORDS = {
     "the", "and", "of", "to", "in", "for", "with", "on", "that", "this", "is", "are",
     "was", "were", "be", "as", "by", "from", "at", "or", "an", "a", "it", "if", "we",
+}
+LANGUAGE_GUARD_DEFAULTS: Dict[str, Dict[str, object]] = {
+    "en": {"special_chars": "", "hint_words": sorted(ENGLISH_HINT_WORDS)},
+    "pl": {
+        "special_chars": "Ä…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽ",
+        "hint_words": sorted(POLISH_HINT_WORDS),
+    },
+    "de": {
+        "special_chars": "Ă¤Ă¶ĂĽĂź",
+        "hint_words": ["der", "die", "das", "und", "ist", "nicht", "ein", "eine", "mit", "zu", "auf"],
+    },
+    "fr": {
+        "special_chars": "Ă Ă˘Ă§Ă©Ă¨ĂŞĂ«Ă®ĂŻĂ´ĂąĂ»ĂĽĂżĹ“",
+        "hint_words": ["le", "la", "les", "et", "est", "pas", "une", "un", "avec", "dans", "pour"],
+    },
+    "es": {
+        "special_chars": "ĂˇĂ©Ă­ĂłĂşĂ±ĂĽ",
+        "hint_words": ["el", "la", "los", "las", "y", "es", "no", "una", "un", "con", "para"],
+    },
+    "pt": {
+        "special_chars": "ĂˇĂ˘ĂŁĂ Ă§Ă©ĂŞĂ­ĂłĂ´ĂµĂş",
+        "hint_words": ["o", "a", "os", "as", "e", "nao", "uma", "um", "com", "para", "que"],
+    },
+    "ro": {
+        "special_chars": "ÄĂ˘Ă®Č™ĹźČ›ĹŁ",
+        "hint_words": ["si", "este", "nu", "un", "o", "cu", "pentru", "care", "din", "la", "pe"],
+    },
 }
 
 
@@ -84,8 +111,8 @@ def _cache_prefix(seg_id: str) -> Optional[str]:
 class Cache:
     """Cache .jsonl (resume) + bezpiecznik: fuzzy match po prefiksie segmentu.
 
-    Jeśli hash segmentu się zmieni (np. drobna modyfikacja HTML), a rozdział i idx zostają,
-    odzyskujemy tłumaczenie z cache po prefiksie <chapter>__<idx>.
+    JeĹ›li hash segmentu siÄ™ zmieni (np. drobna modyfikacja HTML), a rozdziaĹ‚ i idx zostajÄ…,
+    odzyskujemy tĹ‚umaczenie z cache po prefiksie <chapter>__<idx>.
     """
 
     def __init__(self, path: Optional[Path]):
@@ -188,7 +215,7 @@ class OllamaClient:
         data = r.json()
         models = [m.get("name") for m in data.get("models", []) if m.get("name")]
         if not models:
-            raise RuntimeError("Ollama /api/tags nie zwróciło żadnych modeli. Zrób: ollama pull <nazwa>.")
+            raise RuntimeError("Ollama /api/tags nie zwrĂłciĹ‚o ĹĽadnych modeli. ZrĂłb: ollama pull <nazwa>.")
         return models[0]
 
     def generate(self, prompt: str, model: str) -> str:
@@ -225,7 +252,7 @@ class OllamaClient:
             except (ReadTimeout, ReqConnectionError) as e:
                 last_err = e
                 sleep_s = self.cfg.backoff_s[min(attempt - 1, len(self.cfg.backoff_s) - 1)]
-                print(f"  [Ollama] timeout/conn error (próba {attempt}/{self.cfg.max_attempts}; timeout={tmo}s). "
+                print(f"  [Ollama] timeout/conn error (prĂłba {attempt}/{self.cfg.max_attempts}; timeout={tmo}s). "
                       f"Czekam {sleep_s}s i ponawiam...")
                 time.sleep(sleep_s)
             except Exception as e:
@@ -234,7 +261,7 @@ class OllamaClient:
 
         if last_err:
             raise last_err
-        raise RuntimeError("Nieznany błąd w OllamaClient.generate().")
+        raise RuntimeError("Nieznany bĹ‚Ä…d w OllamaClient.generate().")
 
 
 # ----------------------------
@@ -263,13 +290,13 @@ class GoogleConfig:
     max_attempts: int = 3
     backoff_s: Tuple[int, ...] = (5, 15, 30)
 
-    # adaptive throttling (reaguje na błędy 429/5xx)
+    # adaptive throttling (reaguje na bĹ‚Ä™dy 429/5xx)
     max_extra_throttle_s: float = 10.0
     throttle_step_s: float = 0.5
 
 
 class GoogleClient:
-    """Minimalny klient Gemini generateContent (v1beta) + rozszerzona reakcja na błędy."""
+    """Minimalny klient Gemini generateContent (v1beta) + rozszerzona reakcja na bĹ‚Ä™dy."""
 
     def __init__(self, cfg: GoogleConfig):
         if not cfg.api_key or not cfg.api_key.strip():
@@ -315,14 +342,14 @@ class GoogleClient:
                     return x
             if chosen in available:
                 raise RuntimeError(f"Model '{chosen}' jest widoczny dla klucza, ale nie wspiera generateContent.")
-            raise RuntimeError(f"Model '{chosen}' nie jest dostępny dla tego klucza API.")
-        # jeżeli user nie podał modelu, bierz pierwszy wspierający generateContent
+            raise RuntimeError(f"Model '{chosen}' nie jest dostÄ™pny dla tego klucza API.")
+        # jeĹĽeli user nie podaĹ‚ modelu, bierz pierwszy wspierajÄ…cy generateContent
         for m in models:
             if supports_generate(m):
                 name = m.get("name")
                 if isinstance(name, str) and name:
                     return name
-        raise RuntimeError("Nie znaleziono żadnego modelu wspierającego generateContent dla tego klucza.")
+        raise RuntimeError("Nie znaleziono ĹĽadnego modelu wspierajÄ…cego generateContent dla tego klucza.")
 
     def _sleep_until_allowed(self) -> None:
         base = float(getattr(self.cfg, "min_interval_s", 0.0) or 0.0)
@@ -330,7 +357,7 @@ class GoogleClient:
         wait = self._next_allowed_ts - now
         if wait > 0:
             time.sleep(wait)
-        # dodatkowe throttling reagujące na błędy
+        # dodatkowe throttling reagujÄ…ce na bĹ‚Ä™dy
         if self._extra_throttle > 0:
             time.sleep(self._extra_throttle)
 
@@ -339,7 +366,7 @@ class GoogleClient:
         self._next_allowed_ts = time.time() + base
 
     def _bump_throttle(self) -> None:
-        # rośnie do max_extra_throttle_s, skok throttle_step_s
+        # roĹ›nie do max_extra_throttle_s, skok throttle_step_s
         step = float(self.cfg.throttle_step_s or 0.5)
         max_t = float(self.cfg.max_extra_throttle_s or 10.0)
         self._extra_throttle = min(max_t, self._extra_throttle + step)
@@ -364,7 +391,7 @@ class GoogleClient:
                 self._sleep_until_allowed()
                 r = self.session.post(url, json=payload, timeout=self.cfg.timeout_s)
 
-                # Błędy, na które reagujemy retry + backoff:
+                # BĹ‚Ä™dy, na ktĂłre reagujemy retry + backoff:
                 # 429 (quota/rate limit), 408/409 (sporadycznie), 500-504 (chwilowe)
                 if r.status_code in (408, 409, 429, 500, 502, 503, 504) and attempt < self.cfg.max_attempts:
                     self._bump_throttle()
@@ -378,14 +405,14 @@ class GoogleClient:
                             sleep_s = max(sleep_s, ra_val)
                         except Exception:
                             pass
-                    print(f"  [Google] HTTP {r.status_code} (próba {attempt}/{self.cfg.max_attempts}). "
+                    print(f"  [Google] HTTP {r.status_code} (prĂłba {attempt}/{self.cfg.max_attempts}). "
                           f"Czekam {sleep_s:g}s i ponawiam...")
                     time.sleep(sleep_s)
                     self._after_request()
                     continue
 
                 if r.status_code >= 400:
-                    # Nie retry'ujemy w ciemno na inne 4xx; przekaż do warstwy wyżej (batch splitter/fallback)
+                    # Nie retry'ujemy w ciemno na inne 4xx; przekaĹĽ do warstwy wyĹĽej (batch splitter/fallback)
                     retry_after = None
                     ra = r.headers.get("Retry-After")
                     if ra:
@@ -426,13 +453,13 @@ class GoogleClient:
                     break
                 self._bump_throttle()
                 sleep_s = self.cfg.backoff_s[min(attempt - 1, len(self.cfg.backoff_s) - 1)]
-                print(f"  [Google] timeout/conn error (próba {attempt}/{self.cfg.max_attempts}). "
+                print(f"  [Google] timeout/conn error (prĂłba {attempt}/{self.cfg.max_attempts}). "
                       f"Czekam {sleep_s}s i ponawiam...")
                 time.sleep(sleep_s)
                 self._after_request()
             except GoogleHTTPError as e:
                 last_err = e
-                # dla 4xx (poza 408/409/429) nie robimy retry tutaj; warstwa batch może podzielić payload
+                # dla 4xx (poza 408/409/429) nie robimy retry tutaj; warstwa batch moĹĽe podzieliÄ‡ payload
                 break
             except Exception as e:
                 last_err = e
@@ -440,7 +467,7 @@ class GoogleClient:
 
         if last_err:
             raise last_err
-        raise RuntimeError("Nieznany błąd w GoogleClient.generate().")
+        raise RuntimeError("Nieznany bĹ‚Ä…d w GoogleClient.generate().")
 
 
 # ----------------------------
@@ -512,11 +539,11 @@ def pick_glossary_snippet(text: str, index: Dict[str, List[GlossaryEntry]], max_
     if not chosen:
         return ""
 
-    lines = ["Terminologia wiążąca (użyj dokładnie tych form):"]
+    lines = ["Terminologia wiÄ…ĹĽÄ…ca (uĹĽyj dokĹ‚adnie tych form):"]
     for e in chosen:
         v = "; ".join(e.variants[:6])
         if e.note:
-            lines.append(f"- {e.canonical} (EN: {v}) — {e.note}")
+            lines.append(f"- {e.canonical} (EN: {v}) â€” {e.note}")
         else:
             lines.append(f"- {e.canonical} (EN: {v})")
     return "\n".join(lines).strip()
@@ -566,7 +593,7 @@ def parse_spine_and_manifest(zf: zipfile.ZipFile, opf_path: str) -> Tuple[Dict[s
             spine.append(idref)
 
     if not manifest or not spine:
-        raise ValueError("Nie udało się odczytać manifest/spine z OPF.")
+        raise ValueError("Nie udaĹ‚o siÄ™ odczytaÄ‡ manifest/spine z OPF.")
     return manifest, spine
 
 
@@ -596,7 +623,7 @@ def inner_xml(el: etree._Element) -> str:
 
 def has_translatable_text(el: etree._Element) -> bool:
     txt = "".join(el.itertext()).strip()
-    return bool(re.search(r"[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż]", txt))
+    return bool(re.search(r"[A-Za-zÄ„Ä†ÄĹĹĂ“ĹšĹąĹ»Ä…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽ]", txt))
 
 
 def html_entities_to_numeric(s: str) -> str:
@@ -637,7 +664,7 @@ def sanitize_model_output(s: str) -> str:
     if out.startswith("```"):
         out = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", out)
         out = re.sub(r"\s*```$", "", out)
-    out = re.sub(r"^\s*(Tłumaczenie|Translation)\s*:\s*", "", out, flags=re.IGNORECASE)
+    out = re.sub(r"^\s*(TĹ‚umaczenie|Translation)\s*:\s*", "", out, flags=re.IGNORECASE)
     return out.strip()
 
 
@@ -656,14 +683,14 @@ def build_batch_prompt(base_prompt: str, glossary_snippet: str, batch_xml: str) 
         parts.append(glossary_snippet.strip())
     parts.append(
         "Zadanie:\n"
-        "Przetłumacz na język polski PONIŻSZY XML (XHTML).\n"
-        "Wewnątrz <seg> znajdują się fragmenty (wnętrza akapitów). Każdy <seg> tłumacz jako całość.\n"
+        "PrzetĹ‚umacz na jÄ™zyk polski PONIĹ»SZY XML (XHTML).\n"
+        "WewnÄ…trz <seg> znajdujÄ… siÄ™ fragmenty (wnÄ™trza akapitĂłw). KaĹĽdy <seg> tĹ‚umacz jako caĹ‚oĹ›Ä‡.\n"
         "Wymagania krytyczne:\n"
-        "- ZACHOWAJ DOKŁADNIE strukturę i tagi: <batch>, <seg id=\"...\"> oraz WSZYSTKIE tagi XHTML wewnątrz.\n"
-        "- Nie zmieniaj ani nie usuwaj atrybutów, w tym id w <seg>.\n"
-        "- Nie dodawaj żadnego komentarza/metatekstu.\n"
-        "- Zwróć WYŁĄCZNIE wynikowy XML <batch>...</batch>.\n"
-        "\nWEJŚCIE:\n"
+        "- ZACHOWAJ DOKĹADNIE strukturÄ™ i tagi: <batch>, <seg id=\"...\"> oraz WSZYSTKIE tagi XHTML wewnÄ…trz.\n"
+        "- Nie zmieniaj ani nie usuwaj atrybutĂłw, w tym id w <seg>.\n"
+        "- Nie dodawaj ĹĽadnego komentarza/metatekstu.\n"
+        "- ZwrĂłÄ‡ WYĹÄ„CZNIE wynikowy XML <batch>...</batch>.\n"
+        "\nWEJĹšCIE:\n"
         f"{batch_xml}\n"
     )
     return "\n\n".join(parts).strip() + "\n"
@@ -675,7 +702,7 @@ def build_language_instruction(source_lang: str, target_lang: str) -> str:
     return (
         "KRYTYCZNE: Tlumacz wiernie z jezyka "
         f"{src} na jezyk {tgt}. "
-        f"Wynik musi byc wyłącznie w jezyku {tgt}. "
+        f"Wynik musi byc wyĹ‚Ä…cznie w jezyku {tgt}. "
         "Zachowaj znaczniki XML i ich kolejnosc."
     )
 
@@ -691,7 +718,7 @@ def debug_dump(debug_dir: Optional[Path], prefix: str, prompt: str, response: st
 def parse_batch_response(xml_text: str) -> Dict[str, str]:
     raw = sanitize_model_output(xml_text).strip()
     if not raw:
-        raise RuntimeError("Pusta odpowiedź z modelu (response=='' po sanitize).")
+        raise RuntimeError("Pusta odpowiedĹş z modelu (response=='' po sanitize).")
 
     m = re.search(r"(<batch\b[\s\S]*?</batch>)", raw, flags=re.IGNORECASE)
     if m:
@@ -701,12 +728,12 @@ def parse_batch_response(xml_text: str) -> Dict[str, str]:
     parser = etree.XMLParser(recover=True, huge_tree=True)
     root = etree.fromstring(raw.encode("utf-8", errors="replace"), parser=parser)
     if root is None:
-        raise RuntimeError("Nie udało się sparsować odpowiedzi modelu jako XML (root=None).")
+        raise RuntimeError("Nie udaĹ‚o siÄ™ sparsowaÄ‡ odpowiedzi modelu jako XML (root=None).")
 
     if etree.QName(root).localname.lower() != "batch":
         batch = root.find(".//{*}batch")
         if batch is None:
-            raise RuntimeError("Odpowiedź nie zawiera elementu <batch>.")
+            raise RuntimeError("OdpowiedĹş nie zawiera elementu <batch>.")
         root = batch
 
     out: Dict[str, str] = {}
@@ -717,7 +744,7 @@ def parse_batch_response(xml_text: str) -> Dict[str, str]:
         out[sid] = inner_xml(seg)
 
     if not out:
-        raise RuntimeError("Nie znaleziono żadnych <seg id=...> w <batch>.")
+        raise RuntimeError("Nie znaleziono ĹĽadnych <seg id=...> w <batch>.")
     return out
 
 
@@ -737,8 +764,8 @@ def semantic_similarity_score(prev_text: str, new_text: str) -> float:
     if not a or not b:
         return 0.0
     seq_ratio = SequenceMatcher(None, a, b).ratio()
-    tok_a = set(re.findall(r"[a-z0-9ąćęłńóśźż]{2,}", a, flags=re.IGNORECASE))
-    tok_b = set(re.findall(r"[a-z0-9ąćęłńóśźż]{2,}", b, flags=re.IGNORECASE))
+    tok_a = set(re.findall(r"[^\W_]{2,}", a, flags=re.UNICODE))
+    tok_b = set(re.findall(r"[^\W_]{2,}", b, flags=re.UNICODE))
     if not tok_a and not tok_b:
         jaccard = 1.0
     elif not tok_a or not tok_b:
@@ -748,29 +775,69 @@ def semantic_similarity_score(prev_text: str, new_text: str) -> float:
     return max(0.0, min(1.0, (0.55 * seq_ratio) + (0.45 * jaccard)))
 
 
-def looks_like_polish(inner_xml_text: str) -> bool:
+def load_language_guard_profiles(config_path: Optional[Path] = None) -> Dict[str, Dict[str, object]]:
+    profiles: Dict[str, Dict[str, object]] = {k: dict(v) for k, v in LANGUAGE_GUARD_DEFAULTS.items()}
+    if config_path is None:
+        return profiles
+    p = Path(config_path)
+    if not p.exists():
+        return profiles
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return profiles
+    if not isinstance(raw, dict):
+        return profiles
+    for lang, cfg in raw.items():
+        key = str(lang or "").strip().lower()
+        if not key or not isinstance(cfg, dict):
+            continue
+        hints_raw = cfg.get("hint_words", [])
+        hints: List[str] = []
+        if isinstance(hints_raw, list):
+            for h in hints_raw:
+                s = str(h or "").strip().lower()
+                if s:
+                    hints.append(s)
+        special = str(cfg.get("special_chars", "") or "")
+        profiles[key] = {"special_chars": special, "hint_words": sorted(set(hints))}
+    return profiles
+
+
+def looks_like_target_language(
+    inner_xml_text: str,
+    target_lang: str,
+    *,
+    profiles: Optional[Dict[str, Dict[str, object]]] = None,
+) -> bool:
     txt = _plain_text_from_inner_xml(inner_xml_text)
     if not txt:
         return True
-
-    low = txt.lower()
-    if any(ch in low for ch in POLISH_CHARS):
+    lang = str(target_lang or "").strip().lower()
+    prof = (profiles or LANGUAGE_GUARD_DEFAULTS).get(lang)
+    if not isinstance(prof, dict):
         return True
-
-    tokens = re.findall(r"[a-ząćęłńóśźż]{2,}", low, flags=re.IGNORECASE)
+    low = txt.lower()
+    special = str(prof.get("special_chars", "") or "")
+    if special and any(ch in low for ch in special):
+        return True
+    tokens = re.findall(r"[^\W\d_]{2,}", low, flags=re.UNICODE)
     if not tokens:
         return True
-
-    pl_hits = sum(1 for t in tokens if t in POLISH_HINT_WORDS)
-    en_hits = sum(1 for t in tokens if t in ENGLISH_HINT_WORDS)
-
-    if pl_hits >= 2 and pl_hits >= en_hits:
+    hints = {str(x or "").strip().lower() for x in list(prof.get("hint_words", []) or []) if str(x or "").strip()}
+    hint_hits = sum(1 for t in tokens if t in hints) if hints else 0
+    if hint_hits >= 2:
         return True
-    if en_hits >= 3 and pl_hits == 0:
+    en_hits = sum(1 for t in tokens if t in ENGLISH_HINT_WORDS)
+    if lang != "en" and len(tokens) >= 8 and en_hits >= 2 and hint_hits == 0:
         return False
-    if len(tokens) >= 8 and en_hits >= 2 and pl_hits == 0:
+    if hints and len(tokens) >= 10 and hint_hits == 0:
         return False
     return True
+
+
+def looks_like_polish(inner_xml_text: str) -> bool:
+    return looks_like_target_language(inner_xml_text, "pl")
 
 
 # ----------------------------
@@ -887,7 +954,7 @@ def write_epub_atomic(
 # ----------------------------
 
 def is_google_retriable_error(e: Exception) -> bool:
-    # GoogleClient już retry'uje 408/409/429/5xx; tu decydujemy o fallbackach i splitach.
+    # GoogleClient juĹĽ retry'uje 408/409/429/5xx; tu decydujemy o fallbackach i splitach.
     if isinstance(e, GoogleHTTPError):
         return e.status_code in (408, 409, 429, 500, 502, 503, 504)
     if isinstance(e, (ReadTimeout, ReqConnectionError)):
@@ -896,10 +963,10 @@ def is_google_retriable_error(e: Exception) -> bool:
 
 
 def is_google_too_large(e: Exception) -> bool:
-    # Zbyt duże żądanie / payload / model odrzuca:
+    # Zbyt duĹĽe ĹĽÄ…danie / payload / model odrzuca:
     if isinstance(e, GoogleHTTPError):
         return e.status_code in (400, 413)
-    # czasem API zwraca 400 z message o przekroczeniu limitu; to łapiemy heurystycznie
+    # czasem API zwraca 400 z message o przekroczeniu limitu; to Ĺ‚apiemy heurystycznie
     s = str(e).lower()
     return ("request entity too large" in s) or ("payload" in s and "too large" in s) or ("exceeds" in s and "limit" in s)
 
@@ -934,29 +1001,31 @@ def translate_single_segment(
     tr = (mapping.get(seg.seg_id) or "").strip()
     if not tr:
         debug_dump(debug_dir, debug_prefix, prompt, resp)
-        raise RuntimeError(f"Pusty wynik tłumaczenia (single) dla segmentu: {seg.seg_id}")
+        raise RuntimeError(f"Pusty wynik tĹ‚umaczenia (single) dla segmentu: {seg.seg_id}")
     return tr
 
 
-def ensure_polish_translation(
+def ensure_target_language_translation(
     llm: LLMClient,
     model: str,
     base_prompt: str,
     seg: Segment,
     translated_inner: str,
+    target_lang: str,
+    guard_profiles: Dict[str, Dict[str, object]],
     glossary_index: Optional[Dict[str, List[GlossaryEntry]]],
     debug_dir: Optional[Path],
     debug_prefix: str,
 ) -> str:
-    if looks_like_polish(translated_inner):
+    if looks_like_target_language(translated_inner, target_lang, profiles=guard_profiles):
         return translated_inner
 
-    print(f"  [LANG-GUARD] Segment wygląda na nietłumaczony (EN). Retry z wymuszeniem PL: {seg.seg_id}")
+    print(f"  [LANG-GUARD] Segment not in target lang={target_lang}. Retry enforced: {seg.seg_id}")
     forced_prompt = (
         base_prompt.strip()
         + "\n\n"
-        + "KRYTYCZNE: Zwróć wynik wyłącznie po polsku. "
-          "Jeśli wejście jest po angielsku, obowiązkowo przetłumacz je na polski."
+        + f"CRITICAL: Return output strictly in target language '{target_lang}'. "
+          "Do not keep source language text."
     )
     retry = translate_single_segment(
         llm=llm,
@@ -967,12 +1036,10 @@ def ensure_polish_translation(
         debug_dir=debug_dir,
         debug_prefix=f"{debug_prefix}__lang_retry_{seg.idx:06d}",
     )
-    if looks_like_polish(retry):
+    if looks_like_target_language(retry, target_lang, profiles=guard_profiles):
         return retry
 
-    raise RuntimeError(
-        f"Guard języka: segment nadal nie wygląda na polski po retry: {seg.seg_id}"
-    )
+    raise RuntimeError(f"Language guard: segment still not '{target_lang}' after retry: {seg.seg_id}")
 
 
 def translate_batch_with_google_strategy(
@@ -989,9 +1056,9 @@ def translate_batch_with_google_strategy(
 ) -> Dict[str, str]:
     """
     Strategia pod Google:
-    - Spróbuj batch
-    - Jeśli błąd "too large" (400/413) lub parsing/kompletność padnie -> dziel batch na pół i próbuj dalej
-    - Jeśli 429/5xx/timeout -> retry klienta; jeśli nadal błąd -> podziel batch (mniejsze requesty)
+    - SprĂłbuj batch
+    - JeĹ›li bĹ‚Ä…d "too large" (400/413) lub parsing/kompletnoĹ›Ä‡ padnie -> dziel batch na pĂłĹ‚ i prĂłbuj dalej
+    - JeĹ›li 429/5xx/timeout -> retry klienta; jeĹ›li nadal bĹ‚Ä…d -> podziel batch (mniejsze requesty)
     - Ostatecznie fallback per-segment
     """
     if not batch:
@@ -1013,7 +1080,7 @@ def translate_batch_with_google_strategy(
             resp = llm.generate(prompt, model=model)
             mapping = parse_batch_response(resp)
 
-            # brakujące segmenty -> per-seg retry
+            # brakujÄ…ce segmenty -> per-seg retry
             missing = [s for s in batch_local if s.seg_id not in mapping or not (mapping[s.seg_id] or "").strip()]
             if missing:
                 debug_dump(debug_dir, f"{debug_prefix}_missing_d{depth}", prompt, resp)
@@ -1030,7 +1097,7 @@ def translate_batch_with_google_strategy(
         except Exception as e:
             debug_dump(debug_dir, f"{debug_prefix}_err_d{depth}", prompt, resp)
 
-            # Jeśli za duże: dziel
+            # JeĹ›li za duĹĽe: dziel
             if is_google_too_large(e) and len(batch_local) > 1 and depth < max_split_depth:
                 mid = len(batch_local) // 2
                 left = batch_local[:mid]
@@ -1043,7 +1110,7 @@ def translate_batch_with_google_strategy(
                 out.update(_attempt_translate(right, depth + 1))
                 return out
 
-            # Błędy chwilowe albo parsing: jeśli da się dzielić, dziel; inaczej per-segment
+            # BĹ‚Ä™dy chwilowe albo parsing: jeĹ›li da siÄ™ dzieliÄ‡, dziel; inaczej per-segment
             if len(batch_local) > 1 and depth < max_split_depth and is_google_retriable_error(e):
                 mid = len(batch_local) // 2
                 left = batch_local[:mid]
@@ -1085,9 +1152,9 @@ def translate_batch_with_ollama_strategy(
 ) -> Dict[str, str]:
     """
     Strategia pod Ollama:
-    - Spróbuj batch
+    - SprĂłbuj batch
     - Przy timeout/conn/parsing -> fallback per-segment (lokalnie zwykle szybkie i stabilne)
-    - Retry na poziomie klienta (OllamaClient) już istnieje
+    - Retry na poziomie klienta (OllamaClient) juĹĽ istnieje
     """
     seg_items = [(s.seg_id, s.inner) for s in batch]
     batch_xml = build_batch_payload(seg_items)
@@ -1118,7 +1185,7 @@ def translate_batch_with_ollama_strategy(
     missing = [s for s in batch if s.seg_id not in mapping or not (mapping[s.seg_id] or "").strip()]
     if missing:
         debug_dump(debug_dir, f"{debug_prefix}_missing", prompt, resp)
-        print(f"  [Ollama] brak {len(missing)} segmentów -> per-segment retry")
+        print(f"  [Ollama] brak {len(missing)} segmentĂłw -> per-segment retry")
         for s in missing:
             if sleep_s > 0:
                 time.sleep(sleep_s)
@@ -1958,6 +2025,8 @@ def validate_translated_epub(
     epub_path: Path,
     block_tags: Tuple[str, ...],
     *,
+    target_lang: str = "pl",
+    language_guard_config_path: Optional[Path] = None,
     min_chars: int = 40,
     max_suspicious_ratio: float = 0.35,
 ) -> int:
@@ -1969,6 +2038,8 @@ def validate_translated_epub(
         print(f"[VAL-ERR] Nie istnieje plik: {epub_path}")
         return 2
 
+    guard_profiles = load_language_guard_profiles(language_guard_config_path)
+    t_lang = (target_lang or "pl").strip().lower()
     try:
         with zipfile.ZipFile(epub_path, "r") as zin:
             bad_member = zin.testzip()
@@ -1980,7 +2051,7 @@ def validate_translated_epub(
                 opf_path = find_opf_path(zin)
                 manifest, spine = parse_spine_and_manifest(zin, opf_path)
             except Exception as e:
-                print(f"[VAL-ERR] Błąd odczytu OPF/spine: {type(e).__name__}: {e}")
+                print(f"[VAL-ERR] BĹ‚Ä…d odczytu OPF/spine: {type(e).__name__}: {e}")
                 return 2
 
             totals.spine_files = len(spine)
@@ -2018,14 +2089,14 @@ def validate_translated_epub(
                     if len(re.sub(r"\s+", "", plain)) < min_chars:
                         continue
                     totals.checked_segments += 1
-                    if not looks_like_polish(plain):
+                    if not looks_like_target_language(plain, t_lang, profiles=guard_profiles):
                         totals.suspicious_segments += 1
 
     except zipfile.BadZipFile as e:
         print(f"[VAL-ERR] Niepoprawny plik EPUB/ZIP: {e}")
         return 2
     except Exception as e:
-        print(f"[VAL-ERR] Nieoczekiwany błąd walidacji: {type(e).__name__}: {e}")
+        print(f"[VAL-ERR] Nieoczekiwany bĹ‚Ä…d walidacji: {type(e).__name__}: {e}")
         return 2
 
     suspicious_ratio = (
@@ -2035,10 +2106,10 @@ def validate_translated_epub(
     print(f"  Pliki w spine:                 {totals.spine_files}")
     print(f"  Pliki sprawdzone:              {totals.checked_files}")
     print(f"  Pliki XML OK:                  {totals.xml_ok_files}")
-    print(f"  Segmenty sprawdzone (>= {min_chars} znaków): {totals.checked_segments}")
+    print(f"  Segmenty sprawdzone (>= {min_chars} znakĂłw): {totals.checked_segments}")
     print(f"  Segmenty podejrzane (EN):      {totals.suspicious_segments}")
-    print(f"  Współczynnik podejrzanych:     {suspicious_ratio:.1%}")
-    print(f"  Twarde błędy:                  {totals.hard_errors}")
+    print(f"  WspĂłĹ‚czynnik podejrzanych:     {suspicious_ratio:.1%}")
+    print(f"  Twarde bĹ‚Ä™dy:                  {totals.hard_errors}")
 
     if totals.hard_errors > 0:
         print("VALIDATION RESULT: FAIL (hard errors)")
@@ -2050,7 +2121,7 @@ def validate_translated_epub(
         return 3
     if totals.suspicious_segments > 0:
         print("VALIDATION RESULT: OK_WITH_WARNINGS")
-        print("[VAL-WARN] Wykryto segmenty prawdopodobnie nieprzetłumaczone.")
+        print("[VAL-WARN] Wykryto segmenty prawdopodobnie nieprzetĹ‚umaczone.")
         return 0
 
     print("VALIDATION RESULT: OK")
@@ -2077,6 +2148,7 @@ def translate_epub(
     checkpoint_every_files: int = 0,
     checkpoint_json_path: Optional[Path] = None,
     polish_guard: bool = True,
+    language_guard_config_path: Optional[Path] = None,
     source_lang: str = "en",
     target_lang: str = "pl",
     tm: Optional[TranslationMemory] = None,
@@ -2090,8 +2162,9 @@ def translate_epub(
 ) -> None:
     source_lang = (source_lang or "en").strip().lower()
     target_lang = (target_lang or "pl").strip().lower()
-    if target_lang != "pl" and polish_guard:
-        print(f"[LANG-GUARD] target_lang={target_lang} -> wyłączam polish guard.")
+    guard_profiles = load_language_guard_profiles(language_guard_config_path)
+    if polish_guard and target_lang not in guard_profiles:
+        print(f"[LANG-GUARD] no profile for target_lang={target_lang}; guard disabled.")
         polish_guard = False
     base_prompt = base_prompt.strip() + "\n\n" + build_language_instruction(source_lang, target_lang)
     model = llm.resolve_model()
@@ -2117,10 +2190,10 @@ def translate_epub(
                 completed_chapters = {str(x) for x in ck_completed if isinstance(x, str)}
             print(
                 f"[CHECKPOINT-RESUME] wznowienie z {working_input} | "
-                f"ukończone rozdziały: {len(completed_chapters)}"
+                f"ukoĹ„czone rozdziaĹ‚y: {len(completed_chapters)}"
             )
         else:
-            print("[CHECKPOINT-RESUME] checkpoint niepasujący do bieżących ścieżek - ignoruję.")
+            print("[CHECKPOINT-RESUME] checkpoint niepasujÄ…cy do bieĹĽÄ…cych Ĺ›cieĹĽek - ignorujÄ™.")
 
     ledger_seed: Optional[LedgerSeedSummary] = None
     if segment_ledger is not None:
@@ -2145,8 +2218,8 @@ def translate_epub(
     global_changed_retranslated = 0
     semantic_findings: List[Dict[str, Any]] = []
 
-    print("\n=== POSTĘP GLOBALNY (CAŁY EPUB) ===")
-    print(f"  Segmenty łącznie:     {global_total}")
+    print("\n=== POSTÄP GLOBALNY (CAĹY EPUB) ===")
+    print(f"  Segmenty Ĺ‚Ä…cznie:     {global_total}")
     print(f"  Segmenty z cache:     {global_cached}")
     if resume_extra_done > 0:
         print(f"  Segmenty z resume:    {resume_extra_done}")
@@ -2155,7 +2228,7 @@ def translate_epub(
         print(f"  Ledger upserted:     {ledger_seed.upserted_segments}")
         if ledger_seed.pruned_segments > 0:
             print(f"  Ledger pruned:       {ledger_seed.pruned_segments}")
-    print(f"  Segmenty do tłumacz.: {global_to_translate}")
+    print(f"  Segmenty do tĹ‚umacz.: {global_to_translate}")
     if global_total > 0:
         print(f"  Start progress:       {global_done}/{global_total} ({(global_done/global_total)*100:.1f}%)")
     print("===================================\n")
@@ -2209,7 +2282,7 @@ def translate_epub(
             chapter_prev_map: Dict[str, str] = {}
             ledger_rows = segment_ledger.load_chapter_states(chapter_path) if segment_ledger else {}
 
-            # cache + lista do tłumaczenia
+            # cache + lista do tĹ‚umaczenia
             for i, el in enumerate(elements):
                 if not has_translatable_text(el):
                     continue
@@ -2235,7 +2308,7 @@ def translate_epub(
                 tr_cached_exact = cache.get_exact(sid)
                 tr_cached_prefix = cache.get_by_prefix(sid) if tr_cached_exact is None else None
                 if tr_cached_exact is not None:
-                    if polish_guard and not looks_like_polish(tr_cached_exact):
+                    if polish_guard and not looks_like_target_language(tr_cached_exact, target_lang, profiles=guard_profiles):
                         print(f"  [LANG-GUARD] Ignoruje cache (wyglada na EN): {sid}")
                         segs.append(Segment(idx=i, el=el, seg_id=sid, inner=seg_inner, plain=seg_plain))
                         continue
@@ -2251,7 +2324,7 @@ def translate_epub(
                     chapter_prev_map[sid] = tr_cached_prefix
                     segs.append(Segment(idx=i, el=el, seg_id=sid, inner=seg_inner, plain=seg_plain))
                 elif tr_cached_prefix is not None:
-                    if polish_guard and not looks_like_polish(tr_cached_prefix):
+                    if polish_guard and not looks_like_target_language(tr_cached_prefix, target_lang, profiles=guard_profiles):
                         print(f"  [LANG-GUARD] Ignoruje cache-prefix (wyglada na EN): {sid}")
                         segs.append(Segment(idx=i, el=el, seg_id=sid, inner=seg_inner, plain=seg_plain))
                         continue
@@ -2263,7 +2336,7 @@ def translate_epub(
                             global_done += 1
                         segment_ledger.mark_completed(chapter_path, sid, seg_plain, tr_cached_prefix, provider="cache", model=model)
                 elif ledger_done_inner is not None:
-                    if polish_guard and not looks_like_polish(ledger_done_inner):
+                    if polish_guard and not looks_like_target_language(ledger_done_inner, target_lang, profiles=guard_profiles):
                         segs.append(Segment(idx=i, el=el, seg_id=sid, inner=seg_inner, plain=seg_plain))
                         continue
                     replace_inner_xml(el, ledger_done_inner)
@@ -2288,7 +2361,7 @@ def translate_epub(
                         else None
                     )
                     if tm_hit:
-                        if polish_guard and not looks_like_polish(tm_hit):
+                        if polish_guard and not looks_like_target_language(tm_hit, target_lang, profiles=guard_profiles):
                             segs.append(Segment(idx=i, el=el, seg_id=sid, inner=seg_inner, plain=seg_plain))
                         else:
                             replace_inner_xml(el, tm_hit)
@@ -2309,7 +2382,7 @@ def translate_epub(
                 )
 
             if chapter_new_total == 0:
-                # jeśli cache zmienił DOM, zapisujemy ten plik
+                # jeĹ›li cache zmieniĹ‚ DOM, zapisujemy ten plik
                 if chapter_cache > 0 or chapter_tm > 0 or chapter_ledger > 0:
                     out_bytes = etree.tostring(root, encoding="utf-8", xml_declaration=True, pretty_print=False)
                     modified[chapter_path] = out_bytes
@@ -2322,7 +2395,7 @@ def translate_epub(
 
             print(
                 f"\n[{spine_idx}/{spine_total}] {chapter_path}: "
-                f"do przetłumaczenia {chapter_new_total} segmentów (cache: {chapter_cache}, tm: {chapter_tm})"
+                f"do przetĹ‚umaczenia {chapter_new_total} segmentĂłw (cache: {chapter_cache}, tm: {chapter_tm})"
             )
 
             changed = False
@@ -2374,18 +2447,20 @@ def translate_epub(
                     flush=True,
                 )
 
-                # wstrzyknięcie + cache
+                # wstrzykniÄ™cie + cache
                 for s in batch:
                     tr_inner = (mapping.get(s.seg_id) or "").strip()
                     if not tr_inner:
-                        raise RuntimeError(f"Pusty wynik tłumaczenia po fallbacku dla segmentu: {s.seg_id}")
+                        raise RuntimeError(f"Pusty wynik tĹ‚umaczenia po fallbacku dla segmentu: {s.seg_id}")
                     if polish_guard:
-                        tr_inner = ensure_polish_translation(
+                        tr_inner = ensure_target_language_translation(
                             llm=llm,
                             model=model,
                             base_prompt=base_prompt,
                             seg=s,
                             translated_inner=tr_inner,
+                            target_lang=target_lang,
+                            guard_profiles=guard_profiles,
                             glossary_index=glossary_index,
                             debug_dir=debug_dir,
                             debug_prefix=debug_prefix,
@@ -2493,8 +2568,8 @@ def translate_epub(
     )
 
     print("\n=== KONIEC ===")
-    print(f"  Nowe tłumaczenia: {global_new}")
-    print(f"  Segmenty łącznie: {global_total}")
+    print(f"  Nowe tĹ‚umaczenia: {global_new}")
+    print(f"  Segmenty Ĺ‚Ä…cznie: {global_total}")
     if global_total > 0:
         print(f"  Final progress:   {global_done}/{global_total} ({(global_done/global_total)*100:.1f}%)")
     if global_ledger_reused > 0:
@@ -2538,27 +2613,39 @@ def main() -> int:
     ap.add_argument("--source-lang", type=str, default="en")
     ap.add_argument("--target-lang", type=str, default="pl")
     ap.add_argument("--checkpoint-every-files", type=int, default=0)
-    ap.add_argument("--checkpoint-json", type=Path, default=None, help="Plik checkpoint.json dla resume po rozdziałach.")
+    ap.add_argument("--checkpoint-json", type=Path, default=None, help="Plik checkpoint.json dla resume po rozdziaĹ‚ach.")
     ap.add_argument("--debug-dir", type=Path, default=Path("debug"))
     ap.add_argument("--attempts", type=int, default=3)
     ap.add_argument("--backoff", type=str, default="5,15,30")
     ap.add_argument("--tags", type=str, default=",".join(DEFAULT_BLOCK_TAGS))
-    ap.add_argument("--validate-epub", type=Path, default=None, help="Waliduj istniejący EPUB i zakończ bez tłumaczenia.")
-    ap.add_argument("--validate-min-chars", type=int, default=40, help="Minimalna długość segmentu do heurystyki EN/PL.")
+    ap.add_argument("--validate-epub", type=Path, default=None, help="Waliduj istniejÄ…cy EPUB i zakoĹ„cz bez tĹ‚umaczenia.")
+    ap.add_argument("--validate-target-lang", type=str, default="pl", help="Docelowy jezyk walidacji guarda.")
+    ap.add_argument("--validate-min-chars", type=int, default=40, help="Minimalna dĹ‚ugoĹ›Ä‡ segmentu do heurystyki EN/PL.")
     ap.add_argument(
         "--validate-max-suspicious-ratio",
         type=float,
         default=0.35,
-        help="Maksymalny akceptowalny odsetek podejrzanych segmentów EN.",
+        help="Maksymalny akceptowalny odsetek podejrzanych segmentĂłw EN.",
     )
     ap.add_argument(
         "--no-polish-guard",
         action="store_true",
-        help="Wyłącz walidację języka PL przed zapisem do cache (domyślnie guard jest włączony).",
+        help="WyĹ‚Ä…cz walidacjÄ™ jÄ™zyka PL przed zapisem do cache (domyĹ›lnie guard jest wĹ‚Ä…czony).",
     )
-    ap.add_argument("--tm-db", type=Path, default=None, help="Ścieżka do SQLite Translation Memory.")
-    ap.add_argument("--tm-project-id", type=int, default=None, help="ID projektu do powiązania wpisów TM.")
-    ap.add_argument("--tm-fuzzy-threshold", type=float, default=0.92, help="Próg fuzzy TM 0..1.")
+    ap.add_argument(
+        "--no-language-guard",
+        action="store_true",
+        help="Wylacz walidacje jezyka docelowego przed zapisem do cache.",
+    )
+    ap.add_argument(
+        "--language-guard-config",
+        type=Path,
+        default=Path(__file__).resolve().with_name("language_guards.json"),
+        help="JSON z profilami guarda jezykowego (mozna dopisac np. ro).",
+    )
+    ap.add_argument("--tm-db", type=Path, default=None, help="ĹšcieĹĽka do SQLite Translation Memory.")
+    ap.add_argument("--tm-project-id", type=int, default=None, help="ID projektu do powiÄ…zania wpisĂłw TM.")
+    ap.add_argument("--tm-fuzzy-threshold", type=float, default=0.92, help="PrĂłg fuzzy TM 0..1.")
     ap.add_argument("--run-step", choices=["translate", "edit"], default="translate", help="Krok pipeline do scope ledgera.")
     ap.add_argument("--no-diff-aware", action="store_true", help="Wylacz diff-aware retranslation dla cache-prefix.")
     ap.add_argument("--no-semantic-gate", action="store_true", help="Wylacz semantic diff gate i auto-findings QA.")
@@ -2573,20 +2660,22 @@ def main() -> int:
         return validate_translated_epub(
             epub_path=args.validate_epub,
             block_tags=tags,
+            target_lang=str(args.validate_target_lang or "pl").strip().lower(),
+            language_guard_config_path=args.language_guard_config,
             min_chars=max(1, args.validate_min_chars),
             max_suspicious_ratio=max(0.0, min(1.0, args.validate_max_suspicious_ratio)),
         )
 
     if args.input_epub is None or args.output_epub is None:
-        ap.error("Tryb tłumaczenia wymaga pozycyjnych argumentów: input_epub output_epub.")
+        ap.error("Tryb tĹ‚umaczenia wymaga pozycyjnych argumentĂłw: input_epub output_epub.")
     if args.prompt is None:
-        ap.error("Tryb tłumaczenia wymaga --prompt.")
+        ap.error("Tryb tĹ‚umaczenia wymaga --prompt.")
     if not args.provider:
-        ap.error("Tryb tłumaczenia wymaga --provider.")
+        ap.error("Tryb tĹ‚umaczenia wymaga --provider.")
     if not args.model:
-        ap.error("Tryb tłumaczenia wymaga --model.")
+        ap.error("Tryb tĹ‚umaczenia wymaga --model.")
     if args.batch_max_chars is None or args.batch_max_segs is None:
-        ap.error("Tryb tłumaczenia wymaga --batch-max-chars i --batch-max-segs.")
+        ap.error("Tryb tĹ‚umaczenia wymaga --batch-max-chars i --batch-max-segs.")
 
     if not args.input_epub.exists():
         ap.error(f"Nie istnieje plik: {args.input_epub}")
@@ -2612,7 +2701,7 @@ def main() -> int:
     if provider == "google":
         api_key = (args.api_key or "").strip() or os.environ.get("GOOGLE_API_KEY", "").strip()
         if not api_key:
-            ap.error("Dla --provider=google musisz podać --api-key lub ustawić env GOOGLE_API_KEY.")
+            ap.error("Dla --provider=google musisz podaÄ‡ --api-key lub ustawiÄ‡ env GOOGLE_API_KEY.")
         gcfg = GoogleConfig(
             api_key=api_key,
             model=args.model,
@@ -2659,7 +2748,8 @@ def main() -> int:
             debug_dir=args.debug_dir if args.debug_dir else None,
             checkpoint_every_files=args.checkpoint_every_files,
             checkpoint_json_path=args.checkpoint_json,
-            polish_guard=not args.no_polish_guard,
+            polish_guard=not bool(args.no_polish_guard or args.no_language_guard),
+            language_guard_config_path=args.language_guard_config,
             source_lang=args.source_lang,
             target_lang=args.target_lang,
             tm=tm_store,
@@ -2681,3 +2771,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

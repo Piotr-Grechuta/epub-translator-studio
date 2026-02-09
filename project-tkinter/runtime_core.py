@@ -12,7 +12,7 @@ import requests
 
 GOOGLE_API_KEY_ENV = "GOOGLE_API_KEY"
 OLLAMA_HOST_DEFAULT = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-DEFAULT_SUPPORTED_TEXT_LANGS: Set[str] = {"en", "pl", "de", "fr", "es", "pt"}
+DEFAULT_SUPPORTED_TEXT_LANGS: Set[str] = {"en", "pl", "de", "fr", "es", "pt", "ro"}
 
 
 @dataclass
