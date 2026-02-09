@@ -3930,32 +3930,38 @@ class TranslatorGUI:
                 return label
         return None
 
-    def _validate(self) -> Optional[str]:
+    def _validate_required_inputs(self) -> Optional[str]:
         missing_required = self._first_missing_label([
-            ("WejÄąâ€şciowy EPUB", self.input_epub_var.get().strip()),
-            ("WyjÄąâ€şciowy EPUB", self.output_epub_var.get().strip()),
+            ("Wej??ciowy EPUB", self.input_epub_var.get().strip()),
+            ("Wyj??ciowy EPUB", self.output_epub_var.get().strip()),
             ("Prompt", self.prompt_var.get().strip()),
             ("Model", self.model_var.get().strip()),
         ])
         if missing_required is not None:
             return f"Brak pola: {missing_required}"
+        return None
 
+    def _validate_existing_files(self) -> Optional[str]:
         in_file = Path(self.input_epub_var.get().strip())
         if not in_file.exists():
-            return f"Nie istnieje plik wejÄąâ€şciowy: {in_file}"
+            return f"Nie istnieje plik wej??ciowy: {in_file}"
 
         prompt_file = Path(self.prompt_var.get().strip())
         if not prompt_file.exists():
             return f"Nie istnieje plik prompt: {prompt_file}"
+        return None
 
+    def _validate_provider_and_languages(self) -> Optional[str]:
         if self.provider_var.get() == "google" and not self._google_api_key():
-            return f"Dla Google podaj API key albo ustaw zmiennĂ„â€¦ Äąâ€şrodowiskowĂ„â€¦ {GOOGLE_API_KEY_ENV}."
+            return f"Dla Google podaj API key albo ustaw zmienn?? ??rodowiskow?? {GOOGLE_API_KEY_ENV}."
 
         if (self.source_lang_var.get().strip().lower() or "") not in SUPPORTED_TEXT_LANGS:
-            return "NieprawidÄąâ€šowy jĂ„â„˘zyk ÄąĹźrÄ‚Ĺ‚dÄąâ€šowy."
+            return "Nieprawid??owy j??zyk ??r??d??owy."
         if (self.target_lang_var.get().strip().lower() or "") not in SUPPORTED_TEXT_LANGS:
-            return "NieprawidÄąâ€šowy jĂ„â„˘zyk docelowy."
+            return "Nieprawid??owy j??zyk docelowy."
+        return None
 
+    def _validate_numeric_fields(self) -> Optional[str]:
         invalid_int_label = self._first_invalid_int_label([
             ("batch-max-segs", self.batch_max_segs_var.get().strip()),
             ("batch-max-chars", self.batch_max_chars_var.get().strip()),
@@ -3968,14 +3974,26 @@ class TranslatorGUI:
             ("context-segment-max-chars", self.context_segment_max_chars_var.get().strip()),
         ])
         if invalid_int_label is not None:
-            return f"Pole {invalid_int_label} musi byĂ„â€ˇ liczbĂ„â€¦ caÄąâ€škowitĂ„â€¦."
+            return f"Pole {invalid_int_label} musi by?? liczb?? ca??kowit??."
 
         invalid_float_label = self._first_invalid_float_label([
             ("sleep", self.sleep_var.get().strip()),
             ("temperature", self.temperature_var.get().strip()),
         ])
         if invalid_float_label is not None:
-            return f"Pole {invalid_float_label} musi byĂ„â€ˇ liczbĂ„â€¦."
+            return f"Pole {invalid_float_label} musi by?? liczb??."
+        return None
+
+    def _validate(self) -> Optional[str]:
+        for check in (
+            self._validate_required_inputs,
+            self._validate_existing_files,
+            self._validate_provider_and_languages,
+            self._validate_numeric_fields,
+        ):
+            err = check()
+            if err:
+                return err
 
         runtime_err = core_validate_run_options(
             self._runtime_options(),
