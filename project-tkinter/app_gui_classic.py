@@ -4131,6 +4131,34 @@ class TranslatorGUI:
             x = x2
         canvas.create_rectangle(0, 0, width - 1, height - 1, outline="#64748b")
 
+    def _ledger_summary_text(self, counts: Dict[str, int], total: int) -> str:
+        return self.tr(
+            "status.ledger.summary",
+            "Ledger: done={done} processing={processing} error={error} pending={pending} total={total}",
+            done=counts["COMPLETED"],
+            processing=counts["PROCESSING"],
+            error=counts["ERROR"],
+            pending=counts["PENDING"],
+            total=total,
+        )
+
+    def _ledger_alert_suffix(self, project_id: int, step: str, counts: Dict[str, int]) -> str:
+        err_count = int(counts["ERROR"] or 0)
+        if err_count <= LEDGER_ERROR_ALERT_THRESHOLD:
+            self._ledger_alert_key = None
+            return ""
+
+        alert_suffix = f" | ALERT: error>{LEDGER_ERROR_ALERT_THRESHOLD}"
+        alert_key = (int(project_id), str(step), err_count)
+        if self._ledger_alert_key != alert_key:
+            self._ledger_alert_key = alert_key
+            self._set_inline_notice(
+                f"Ledger alert: errors={err_count} (threshold>{LEDGER_ERROR_ALERT_THRESHOLD}).",
+                level="warn",
+                timeout_ms=9000,
+            )
+        return alert_suffix
+
     def _refresh_ledger_status(self) -> None:
         step = self.mode_var.get().strip().lower() or "translate"
         project_id = self.current_project_id
@@ -4150,32 +4178,8 @@ class TranslatorGUI:
             self.ledger_status_var.set(self.tr("status.ledger.empty", "Ledger: no segments yet"))
             self._ledger_alert_key = None
         else:
-            err_count = int(counts["ERROR"] or 0)
-            alert_suffix = ""
-            if err_count > LEDGER_ERROR_ALERT_THRESHOLD:
-                alert_suffix = f" | ALERT: error>{LEDGER_ERROR_ALERT_THRESHOLD}"
-                alert_key = (int(project_id), str(step), err_count)
-                if self._ledger_alert_key != alert_key:
-                    self._ledger_alert_key = alert_key
-                    self._set_inline_notice(
-                        f"Ledger alert: errors={err_count} (threshold>{LEDGER_ERROR_ALERT_THRESHOLD}).",
-                        level="warn",
-                        timeout_ms=9000,
-                    )
-            else:
-                self._ledger_alert_key = None
-            self.ledger_status_var.set(
-                self.tr(
-                    "status.ledger.summary",
-                    "Ledger: done={done} processing={processing} error={error} pending={pending} total={total}",
-                    done=counts["COMPLETED"],
-                    processing=counts["PROCESSING"],
-                    error=counts["ERROR"],
-                    pending=counts["PENDING"],
-                    total=total,
-                )
-                + alert_suffix
-            )
+            alert_suffix = self._ledger_alert_suffix(int(project_id), step, counts)
+            self.ledger_status_var.set(self._ledger_summary_text(counts, total) + alert_suffix)
         self._draw_ledger_bar()
 
     def _tick_activity(self) -> None:
