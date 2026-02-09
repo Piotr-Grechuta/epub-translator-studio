@@ -918,7 +918,8 @@ class StudioSuiteWindow:
                 self.win.after(0, lambda: self._dbu_log(f"[DBU] {msg}\n"))
                 self.win.after(0, lambda: self._dbu_set_status(done_ok_text))
             except Exception as e:
-                self.win.after(0, lambda: self._dbu_log(f"[DBU] ERROR: {e}\n"))
+                err_text = str(e)
+                self.win.after(0, lambda: self._dbu_log(f"[DBU] ERROR: {err_text}\n"))
                 self.win.after(0, lambda: self._dbu_set_status("Status: error"))
             finally:
                 self.win.after(0, self._dbu_refresh_status)
