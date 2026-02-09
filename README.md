@@ -107,7 +107,7 @@ export GOOGLE_API_KEY="<YOUR_KEY>"
 
 ## Support
 - Sponsor: https://github.com/sponsors/Piotr-Grechuta
-- a support link is also available directly in Tkinter app UI (`Wesprzyj projekt`)
+- a support link is also available directly in Tkinter app UI (`Support the project`)
 - ready PL template for GitHub Sponsors profile: `.github/SPONSORS_PROFILE_TEMPLATE_PL.md`
 - ready PL outreach pack (posts/release CTA): `.github/SPONSORS_OUTREACH_PACK_PL.md`
 - community templates for feedback/contributions: `.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE.md`

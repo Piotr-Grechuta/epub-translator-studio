@@ -10,6 +10,8 @@
 - `M5`: domkniete (nested-inline chips w edytorze + dodatkowe testy regresji + walidator integralnosci `&shy;/&nbsp;` z raportem po runie).
 - `M6`: domkniete (diff-aware retranslation + semantic diff gate + raport changed/reused/retranslated + auto-findings QA).
 - Increment Async I/O: wdrozony bezpieczny etap preflight (`Health check I/O` providerow + `Health check all (async)` pluginow), pelny async dispatch translacji pozostaje kolejnym krokiem.
+- `M3-M7`: issue i milestone na GitHub domkniete (cleanup statusow wykonany).
+- `M8`: uruchomione (otwarte issue: `#45`, `#46`, `#47`, `#48`, `#49`).
 
 ## 7.1. Priorytety techniczne
 
@@ -75,11 +77,13 @@ Jesli projekt oszczedza czas:
 - mniejsza liczba problemow z konfiguracja,
 - szybszy onboarding nowego urzadzenia.
 
-## 7.8. Kolejne milestone'y (po M1-M2, M3-M7 domkniete)
+## 7.8. Kolejne milestone'y (aktywny plan)
 
-1. Stabilizacja i utrzymanie M4-M7 (bugfixy + ergonomia).
-2. Utrzymanie dokumentacji Wiki i synchronizacji z `docs/wiki`.
-3. Kolejny increment funkcjonalny po uzgodnieniu backlogu.
+1. `M8#45`: pelny async dispatch translacji (kontrolowana wspolbieznosc + rate-limit).
+2. `M8#46`: mocniejsze typowanie i walidacja kontraktow runtime.
+3. `M8#47`: automatyzacja release notes (CHANGELOG + metryki runtime).
+4. `M8#48`: telemetryczny health-check z historia i trendami.
+5. `M8#49`: konfigurowalne language guards dla dowolnego jezyka docelowego.
 
 Zakres i kryteria `Done` sa utrzymywane w:
 - `docs/09-Backlog-do-uzgodnienia.md`

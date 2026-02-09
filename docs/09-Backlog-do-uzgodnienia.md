@@ -9,6 +9,8 @@ Status:
 - `M6 zrealizowane`: diff-aware retranslation + semantic diff gate do recenzji,
 - `M7 domkniete`: pelny series manager (termy + style rules + lorebook + historia), prompt augmentation kontekstem serii, orchestrator batch serii + raport.
 - Increment Async I/O: zrealizowany etap preflight providerow/pluginow (asynchroniczne health-checki i telemetryka), bez zmiany deterministycznego pipeline translacji.
+- Milestone `M3-M7` i ich issue sa domkniete na GitHub.
+- Aktywny jest milestone `M8` (issue: `#45-#49`).
 
 ## Cel
 
@@ -16,8 +18,59 @@ Zamienic roadmape na konkretne, mierzalne zadania z jasnym zakresem i kryteriami
 
 ## Aktywne milestone'y
 
-1. `M3: Workflow + Docs + Wiki`
-2. Utrzymanie i stabilizacja M4-M7
+1. `M8: Async Runtime + Release Automation`
+
+## M8: Async Runtime + Release Automation
+
+Status M8: `aktywny`.
+
+### Issue #45: Async translation dispatcher z kontrolowana wspolbieznoscia i rate-limit
+- Zakres:
+  - `io_concurrency` provider-aware dla zapytan API,
+  - semafor i kolejka requestow bez naruszenia idempotencji,
+  - kompatybilnosc z retry/backoff/cancel i ledgerem.
+- Done:
+  - brak duplikatow ledgera przy `io_concurrency > 1`,
+  - zgodnosc wynikow dla `io_concurrency = 1`,
+  - testy regresji i benchmark wydajnosci.
+
+### Issue #46: Mocniejsze typowanie i walidacja kontraktow runtime
+- Zakres:
+  - doprecyzowanie kontraktow typow w modulach runtime/provider/repository,
+  - check typow w CI (uzgodniony scope),
+  - runtime validation wejsc i payloadow.
+- Done:
+  - type-check przechodzi,
+  - bledne kontrakty sa wyłapywane early-fail,
+  - brak regresji funkcjonalnych.
+
+### Issue #47: Automatyzacja release notes (CHANGELOG + metryki runtime)
+- Zakres:
+  - generator release notes,
+  - workflow CI do draft release,
+  - standard sekcji: zmiany/ryzyka/migracja/testy.
+- Done:
+  - jedna komenda buduje gotowy draft `.md`,
+  - CI publikuje artefakt i szkic release.
+
+### Issue #48: Telemetryczny health-check providerow (historia + trendy)
+- Zakres:
+  - trwały zapis pomiarow health-check,
+  - trend/failure streak w UI,
+  - progi alertow i retencja.
+- Done:
+  - historia pomiarow zapisywana i czytelna w dashboardzie,
+  - testy DB i prezentacji danych przechodza.
+
+### Issue #49: Konfigurowalne language guards dla dowolnego jezyka docelowego
+- Zakres:
+  - UI/config dla guard profili (hint words, chars, progi),
+  - import/export profili,
+  - integracja z `target_lang` runtime.
+- Done:
+  - mozna dodac nowy profil jezykowy bez zmiany kodu,
+  - profile sa walidowane i trwale,
+  - testy custom guardow przechodza.
 
 ## M1: UI Consistency + UX Telemetry
 
@@ -266,9 +319,11 @@ Status:
 
 ## Kolejnosc realizacji (zaktualizowana)
 
-1. `M4` utrzymanie i stabilizacja po wdrozeniu.
-2. `M7` utrzymanie i ergonomia po wdrozeniu.
-3. Utrzymanie M3 (regularna synchronizacja `docs/wiki` -> Wiki).
+1. `M8#45` (Async dispatcher) - najpierw.
+2. `M8#46` (typowanie/kontrakty) rownolegle z #45.
+3. `M8#48` (telemetria historii health-check) po bazowym async.
+4. `M8#47` (release automation) po ustabilizowaniu danych metryk.
+5. `M8#49` (custom language guards) jako increment UX/runtime.
 
 ## Definicja publikacji milestone
 
