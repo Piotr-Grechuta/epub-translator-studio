@@ -2,15 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-TĹUMACZ EPUB: Google vs Ollama â€” rĂłĹĽne mechanizmy optymalizacji per provider
+EPUB translator: Google vs Ollama - separate optimization paths per provider.
 
-Wymagania uĹĽytkownika:
-- PodziaĹ‚ mechanizmĂłw: osobna polityka pod Google i osobna pod Ollama
-- Google: reaguj na bĹ‚Ä™dy (nie tylko 429) i rĂłb rozsÄ…dne fallbacki
-- Ollama: dziaĹ‚a lokalnie; host moĹĽe byÄ‡ staĹ‚y (starter nie pyta)
-- PostÄ™p GLOBALNY caĹ‚ego projektu (caĹ‚y EPUB), a nie tylko pliku/segmentu
+User requirements:
+- Separate policies for Google and Ollama.
+- Google: react to errors (not only 429) and use reasonable fallbacks.
+- Ollama: local mode; host can stay fixed.
+- GLOBAL progress for the whole EPUB project, not only file/segment.
 
-ZaleĹĽnoĹ›ci:
+Dependencies:
   pip install requests lxml
 """
 
@@ -700,7 +700,7 @@ def parse_spine_and_manifest(zf: zipfile.ZipFile, opf_path: str) -> Tuple[Dict[s
             spine.append(idref)
 
     if not manifest or not spine:
-        raise ValueError("Nie udaĹ‚o siÄ™ odczytaÄ‡ manifest/spine z OPF.")
+        raise ValueError("Nie udało się odczytać manifest/spine z OPF.")
     return manifest, spine
 
 
@@ -730,7 +730,7 @@ def inner_xml(el: etree._Element) -> str:
 
 def has_translatable_text(el: etree._Element) -> bool:
     txt = "".join(el.itertext()).strip()
-    return bool(re.search(r"[A-Za-zÄ„Ä†ÄĹĹĂ“ĹšĹąĹ»Ä…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽ]", txt))
+    return bool(re.search(r"[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż]", txt))
 
 
 def html_entities_to_numeric(s: str) -> str:
@@ -1639,7 +1639,7 @@ def translate_single_segment(
     tr = (mapping.get(seg.seg_id) or "").strip()
     if not tr:
         debug_dump(debug_dir, debug_prefix, prompt, resp)
-        raise RuntimeError(f"Pusty wynik tĹ‚umaczenia (single) dla segmentu: {seg.seg_id}")
+        raise RuntimeError(f"Pusty wynik tłumaczenia (single) dla segmentu: {seg.seg_id}")
     return tr
 
 
@@ -2791,7 +2791,7 @@ def validate_translated_epub(
         return 3
     if totals.suspicious_segments > 0:
         print("VALIDATION RESULT: OK_WITH_WARNINGS")
-        print("[VAL-WARN] Wykryto segmenty prawdopodobnie nieprzetĹ‚umaczone.")
+        print("[VAL-WARN] Wykryto segmenty prawdopodobnie nieprzetłumaczone.")
         return 0
 
     print("VALIDATION RESULT: OK")
@@ -3167,7 +3167,7 @@ def translate_epub(
 
             print(
                 f"\n[{spine_idx}/{spine_total}] {chapter_path}: "
-                f"do przetĹ‚umaczenia {chapter_new_total} segmentĂłw (cache: {chapter_cache}, tm: {chapter_tm})"
+                f"do przetłumaczenia {chapter_new_total} segmentów (cache: {chapter_cache}, tm: {chapter_tm})"
             )
 
             changed = False
@@ -3212,7 +3212,7 @@ def translate_epub(
                     tr_inner = (mapping_local.get(seg_local.seg_id) or "").strip()
                     if not tr_inner:
                         raise RuntimeError(
-                            f"Pusty wynik tĹ‚umaczenia po fallbacku dla segmentu: {seg_local.seg_id}"
+                            f"Pusty wynik tłumaczenia po fallbacku dla segmentu: {seg_local.seg_id}"
                         )
                     if polish_guard:
                         tr_inner = ensure_target_language_translation(
@@ -3460,8 +3460,8 @@ def translate_epub(
     )
 
     print("\n=== KONIEC ===")
-    print(f"  Nowe tĹ‚umaczenia: {global_new}")
-    print(f"  Segmenty Ĺ‚Ä…cznie: {global_total}")
+    print(f"  Nowe tłumaczenia: {global_new}")
+    print(f"  Segmenty łącznie: {global_total}")
     if global_total > 0:
         print(f"  Final progress:   {global_done}/{global_total} ({(global_done/global_total)*100:.1f}%)")
     if global_ledger_reused > 0:
@@ -3510,14 +3510,14 @@ def main() -> int:
     ap.add_argument("--source-lang", type=str, default="en")
     ap.add_argument("--target-lang", type=str, default="pl")
     ap.add_argument("--checkpoint-every-files", type=int, default=0)
-    ap.add_argument("--checkpoint-json", type=Path, default=None, help="Plik checkpoint.json dla resume po rozdziaĹ‚ach.")
+    ap.add_argument("--checkpoint-json", type=Path, default=None, help="Plik checkpoint.json dla resume po rozdziałach.")
     ap.add_argument("--debug-dir", type=Path, default=Path("debug"))
     ap.add_argument("--attempts", type=int, default=3)
     ap.add_argument("--backoff", type=str, default="5,15,30")
     ap.add_argument("--tags", type=str, default=",".join(DEFAULT_BLOCK_TAGS))
-    ap.add_argument("--validate-epub", type=Path, default=None, help="Waliduj istniejÄ…cy EPUB i zakoĹ„cz bez tĹ‚umaczenia.")
+    ap.add_argument("--validate-epub", type=Path, default=None, help="Waliduj istniejący EPUB i zakończ bez tłumaczenia.")
     ap.add_argument("--validate-target-lang", type=str, default="pl", help="Docelowy jezyk walidacji guarda.")
-    ap.add_argument("--validate-min-chars", type=int, default=40, help="Minimalna dĹ‚ugoĹ›Ä‡ segmentu do heurystyki EN/PL.")
+    ap.add_argument("--validate-min-chars", type=int, default=40, help="Minimalna długość segmentu do heurystyki EN/PL.")
     ap.add_argument(
         "--validate-max-suspicious-ratio",
         type=float,
@@ -3578,15 +3578,15 @@ def main() -> int:
         )
 
     if args.input_epub is None or args.output_epub is None:
-        ap.error("Tryb tĹ‚umaczenia wymaga pozycyjnych argumentĂłw: input_epub output_epub.")
+        ap.error("Tryb tłumaczenia wymaga pozycyjnych argumentów: input_epub output_epub.")
     if args.prompt is None:
-        ap.error("Tryb tĹ‚umaczenia wymaga --prompt.")
+        ap.error("Tryb tłumaczenia wymaga --prompt.")
     if not args.provider:
-        ap.error("Tryb tĹ‚umaczenia wymaga --provider.")
+        ap.error("Tryb tłumaczenia wymaga --provider.")
     if not args.model:
-        ap.error("Tryb tĹ‚umaczenia wymaga --model.")
+        ap.error("Tryb tłumaczenia wymaga --model.")
     if args.batch_max_chars is None or args.batch_max_segs is None:
-        ap.error("Tryb tĹ‚umaczenia wymaga --batch-max-chars i --batch-max-segs.")
+        ap.error("Tryb tłumaczenia wymaga --batch-max-chars i --batch-max-segs.")
 
     if not args.input_epub.exists():
         ap.error(f"Nie istnieje plik: {args.input_epub}")
