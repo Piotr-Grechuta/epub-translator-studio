@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 ## Unreleased
 
 ### Added
+- Easy Startup core helpers for no-config flow:
+  - `project-tkinter/easy_startup.py` (input discovery, safe output conflict resolution, project auto-match, resume eligibility),
+  - tests: `project-tkinter/tests/test_easy_startup.py`.
+- Reliability retry UX helpers:
+  - `project-tkinter/retry_ux.py` (retry state model, adaptive backoff with jitter, structured telemetry formatter),
+  - tests: `project-tkinter/tests/test_retry_ux.py`.
+- Prompt router helpers for segment-aware strategy selection:
+  - deterministic segment/batch classifier (`dialogue`, `narrative`, `mixed`, `other`),
+  - strategy contracts (`default`, `dialogue`, `narrative`) with fallback to default,
+  - tests: `project-tkinter/tests/test_prompt_router.py`.
 - Series technical skeleton for Tkinter:
   - project-to-series assignment (`projects.series_id`, `projects.volume_no`),
   - `series` table in main DB,
@@ -54,6 +64,27 @@ All notable changes to this project are documented in this file.
   - `project-tkinter/tests/test_async_health_checks.py`.
 
 ### Changed
+- Milestone status alignment:
+  - `M10` marked as closed in roadmap/backlog/wiki entries after completing `#53`, `#54`, `#55`.
+- `project-tkinter/app_gui_classic.py`:
+  - startup defaults now support no-config auto-pathing and project auto-bind/create for single-click entry,
+  - ambiguous startup cases use lightweight chooser prompts instead of hard-fail,
+  - startup status now reports fresh context vs resumed context.
+- `project-tkinter/translation_engine.py`:
+  - provider retry loop emits structured retry telemetry (`[RETRY] ... state=waiting_retry/recovered`),
+  - adaptive backoff respects `Retry-After` plus jitter,
+  - terminal retry failures are summarized once when retry budget is exhausted.
+- `project-tkinter/translation_engine.py`:
+  - prompt router now selects segment-aware strategy before request build,
+  - runtime logs include selected strategy id and classifier confidence,
+  - strategy id is persisted in ledger model field for auditability (`model|strategy=<id>`).
+- `project-tkinter/app_gui_classic.py`:
+  - run phase now shows friendly waiting/recovered states from retry telemetry without switching to error state.
+- Roadmap/repository alignment (GitHub + docs):
+  - closed umbrella issue `#51` (M9) and moved active delivery tracks to milestone `M10` (`#53`, `#54`, `#55`),
+  - synchronized status in `docs/07-Roadmapa-i-kontrybucje.md` and `docs/09-Backlog-do-uzgodnienia.md`.
+- README update:
+  - added bilingual quick section (EN/PL) to `README.md`.
 - Naming cleanup (repo alignment):
   - `project-tkinter/tlumacz_ollama.py` renamed to `project-tkinter/translation_engine.py`,
   - `project-tkinter/start.py` renamed to `project-tkinter/launcher_classic.py`,
