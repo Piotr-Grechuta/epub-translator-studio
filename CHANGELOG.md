@@ -64,6 +64,8 @@ All notable changes to this project are documented in this file.
   - `project-tkinter/tests/test_async_health_checks.py`.
 
 ### Changed
+- Milestone status alignment:
+  - `M10` marked as closed in roadmap/backlog/wiki entries after completing `#53`, `#54`, `#55`.
 - `project-tkinter/app_gui_classic.py`:
   - startup defaults now support no-config auto-pathing and project auto-bind/create for single-click entry,
   - ambiguous startup cases use lightweight chooser prompts instead of hard-fail,

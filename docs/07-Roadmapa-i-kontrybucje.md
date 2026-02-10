@@ -13,7 +13,7 @@
 - `M3-M7`: issue i milestone na GitHub domkniete (cleanup statusow wykonany).
 - `M8`: domkniete na GitHub (issue: `#45`, `#46`, `#47`, `#48`, `#49` sa zamkniete; milestone zamkniety).
 - `M9`: domkniete (`#51` zamkniete jako umbrella; zakres rozbity na `M10`).
-- `M10`: aktywne (issue: `#53`, `#54`, `#55`).
+- `M10`: domkniete na GitHub (`#53`, `#54`, `#55` zamkniete; milestone zamkniety).
 
 ## 7.1. Priorytety techniczne
 
@@ -79,7 +79,7 @@ Jesli projekt oszczedza czas:
 - mniejsza liczba problemow z konfiguracja,
 - szybszy onboarding nowego urzadzenia.
 
-## 7.8. Kolejne milestone'y (M8 i M9 domkniete, M10 aktywne)
+## 7.8. Kolejne milestone'y (M8-M10 domkniete)
 
 1. `M8#45`: DONE.
 2. `M8#46`: DONE.
@@ -87,9 +87,9 @@ Jesli projekt oszczedza czas:
 4. `M8#48`: DONE.
 5. `M8#49`: DONE.
 6. `M9#51`: DONE (zamkniete jako umbrella; scope podzielony na M10).
-7. `M10#53`: Prompt Router (segment-aware system prompt selection).
-8. `M10#54`: Easy Startup (auto-pathing + auto-resume, no-config).
-9. `M10#55`: Reliability UX (silent wait-and-retry dla transient provider errors).
+7. `M10#53`: DONE (Prompt Router).
+8. `M10#54`: DONE (Easy Startup).
+9. `M10#55`: DONE (Reliability UX).
 
 Zakres i kryteria `Done` sa utrzymywane w:
 - `docs/09-Backlog-do-uzgodnienia.md`

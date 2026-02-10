@@ -8,7 +8,7 @@ This page tracks major updates that changed day-to-day workflow.
 
 - `M8` closed (`#45-#49`).
 - `M9` closed (umbrella `#51` closed).
-- `M10` active with focused delivery tracks:
+- `M10` closed with focused delivery tracks delivered:
   - `#53` Prompt Router (segment-aware system prompt selection),
   - `#54` Easy Startup (auto-pathing + auto-resume),
   - `#55` Reliability UX (silent wait-and-retry).
@@ -40,7 +40,7 @@ Ta strona zbiera najwazniejsze aktualizacje projektu, ktore zmienily codzienny w
 
 - `M8` domkniety (`#45-#49`).
 - `M9` domkniety (zamkniete issue-umbrella `#51`).
-- `M10` aktywny z podzialem na strumienie:
+- `M10` domkniety po dowiezieniu strumieni:
   - `#53` Prompt Router (segment-aware wybor promptu systemowego),
   - `#54` Easy Startup (auto-pathing + auto-resume),
   - `#55` Reliability UX (silent wait-and-retry).

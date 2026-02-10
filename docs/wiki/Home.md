@@ -10,7 +10,7 @@ This wiki is a quick entry point. Full technical details are in repository `docs
 
 - Milestone `M8` closed (`#45-#49`): async runtime increment, release automation, provider health telemetry.
 - Milestone `M9` closed (umbrella `#51`), with scope split into active `M10` tracks.
-- Milestone `M10` active (`#53-#55`): Prompt Router, Easy Startup, Reliability UX.
+- Milestone `M10` closed (`#53-#55`): Prompt Router, Easy Startup, Reliability UX delivered.
 - Release draft automation is available in CI (`.github/workflows/release-draft.yml`).
 
 ### Start here
@@ -38,7 +38,7 @@ Ta wiki to szybki punkt startowy. Pelne szczegoly techniczne sa w `docs/` w repo
 
 - Milestone `M8` domkniety (`#45-#49`): increment async runtime, automatyzacja release, telemetryka health providerow.
 - Milestone `M9` domkniety (umbrella `#51`), zakres rozdzielony na aktywne strumienie `M10`.
-- Milestone `M10` aktywny (`#53-#55`): Prompt Router, Easy Startup, Reliability UX.
+- Milestone `M10` domkniety (`#53-#55`): Prompt Router, Easy Startup, Reliability UX dowiezione.
 - Automatyzacja draftu release dziala w CI (`.github/workflows/release-draft.yml`).
 
 ### Zacznij tutaj

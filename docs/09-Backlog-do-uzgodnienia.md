@@ -12,7 +12,7 @@ Status:
 - Milestone `M3-M7` i ich issue sa domkniete na GitHub.
 - Milestone `M8` jest domkniety (issue: `#45-#49` zamkniete).
 - Milestone `M9` jest domkniety (`#51` zamkniete jako issue-umbrella).
-- Aktywny jest milestone `M10` (issue: `#53-#55`).
+- Milestone `M10` jest domkniety (`#53-#55` zamkniete).
 
 ## Cel
 
@@ -21,7 +21,7 @@ Zamienic roadmape na konkretne, mierzalne zadania z jasnym zakresem i kryteriami
 ## Aktywne milestone'y
 
 1. `M9: Literary Consistency + Assistive QA + MCP`
-2. `M10: Easy Mode Delivery Tracks`
+2. `M10: Easy Mode Delivery Tracks` (domkniety)
 3. `M8: Async Runtime + Release Automation` (domkniety)
 
 ## M8: Async Runtime + Release Automation
@@ -87,7 +87,7 @@ Status M9: `domkniety` (issue umbrella `#51` zamkniete; realizacja rozbita na M1
 
 ## M10: Easy Mode Delivery Tracks
 
-Status M10: `aktywny`.
+Status M10: `domkniety`.
 
 ### Issue #53: Prompt Router: segment-aware system prompt selection
 - Zakres:
